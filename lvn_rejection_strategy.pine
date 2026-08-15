@@ -1,0 +1,538 @@
+//@version=6
+strategy(
+    "LVN Rejection Strategy",
+    overlay = true,
+    pyramiding = 0,
+    initial_capital = 100000,
+    default_qty_type = strategy.fixed,
+    default_qty_value = 1,
+    commission_type = strategy.commission.percent,
+    commission_value = 0.0,
+    slippage = 0,
+    calc_on_order_fills = true,
+    process_orders_on_close = false,
+    use_bar_magnifier = true,
+    fill_orders_on_standard_ohlc = true,
+    backtest_fill_limits_assumption = 0,
+    max_lines_count = 100,
+    max_labels_count = 100
+)
+
+// This prototype freezes each completed session's profile, ranks LVNs provisionally from
+// lowest profile-row volume upward, and trades those frozen levels during the following session.
+// Its profile engine is a chart-bar overlap approximation, not a reproduction of TradingView FRVP.
+
+string GROUP_SESSION = "Session"
+string GROUP_PROFILE = "Volume Profile"
+string GROUP_LVN = "LVN Detection"
+string GROUP_SELECTION = "LVN Selection"
+string GROUP_ENTRY = "Entry"
+string GROUP_RISK = "Risk Management"
+string GROUP_BACKTEST = "Backtesting"
+string GROUP_DISPLAY = "Display"
+string ENTRY_OCA_GROUP = "LVN_ENTRIES"
+
+int MAX_SUPPORTED_RANKS = 10
+
+string profileSession = input.session("1800-1600", "Profile Session", group = GROUP_SESSION)
+string sessionTimezone = input.string("America/New_York", "Timezone", group = GROUP_SESSION)
+bool closePositionsAtSessionEnd = input.bool(true, "Close positions at session end", group = GROUP_SESSION)
+
+int profileRows = input.int(100, "Profile Rows", minval = 10, maxval = 300, group = GROUP_PROFILE)
+string volumeAllocationMethod = input.string("Chart-Bar Overlap Approximation", "Volume Allocation", options = ["Chart-Bar Overlap Approximation"], group = GROUP_PROFILE)
+
+string lvnMethod = input.string("Local Minimum", "LVN Method", options = ["Local Minimum", "Relative to POC", "Neighbor Threshold"], group = GROUP_LVN)
+int neighborWindow = input.int(1, "Neighbor Window", minval = 1, maxval = 5, group = GROUP_LVN)
+float relativeDepthThreshold = input.float(0.50, "Neighbor Depth Threshold", minval = 0.05, maxval = 2.0, step = 0.05, group = GROUP_LVN)
+float pocVolumeThreshold = input.float(0.25, "Max POC Volume Ratio", minval = 0.01, maxval = 1.0, step = 0.01, group = GROUP_LVN)
+int minSeparationRows = input.int(2, "Minimum LVN Separation (rows)", minval = 0, maxval = 20, group = GROUP_LVN)
+int maxLvns = input.int(5, "Maximum Ranked LVNs", minval = 1, maxval = MAX_SUPPORTED_RANKS, group = GROUP_LVN)
+
+bool tradeLVN1 = input.bool(true, "Trade LVN #1", group = GROUP_SELECTION)
+bool tradeLVN2 = input.bool(true, "Trade LVN #2", group = GROUP_SELECTION)
+bool tradeLVN3 = input.bool(false, "Trade LVN #3", group = GROUP_SELECTION)
+bool tradeLVN4 = input.bool(false, "Trade LVN #4", group = GROUP_SELECTION)
+bool tradeLVN5 = input.bool(false, "Trade LVN #5", group = GROUP_SELECTION)
+
+float minimumApproachDistance = input.float(0.0, "Minimum Approach Distance", minval = 0.0, step = 0.01, group = GROUP_ENTRY)
+string repeatTouchMode = input.string("One trade per LVN per session", "Repeat Touch Handling", options = ["One trade per LVN per session", "First LVN trade of session only", "Allow repeated LVN trades"], group = GROUP_ENTRY)
+float orderQty = input.float(1.0, "Order Size", minval = 0.01, step = 0.01, group = GROUP_ENTRY)
+
+string riskMode = input.string("Fixed Points", "Risk Management", options = ["Fixed Points", "LVN Boundary + R"], group = GROUP_RISK)
+float fixedSLPoints = input.float(5.0, "Fixed Stop Loss Points", minval = 0.0, step = 0.01, group = GROUP_RISK)
+float fixedTPPoints = input.float(10.0, "Fixed Take Profit Points", minval = 0.0, step = 0.01, group = GROUP_RISK)
+float rrMultiple = input.float(1.5, "Reward / Risk Multiple", minval = 0.1, step = 0.1, group = GROUP_RISK)
+float lvnBoundaryBuffer = input.float(0.0, "LVN Boundary Buffer", minval = 0.0, step = 0.01, group = GROUP_RISK)
+
+int startDate = input.time(timestamp("01 Jan 2024 00:00 +0000"), "Start Date", group = GROUP_BACKTEST)
+int endDate = input.time(timestamp("31 Dec 2099 23:59 +0000"), "End Date", group = GROUP_BACKTEST)
+
+bool showLvns = input.bool(true, "Show LVNs", group = GROUP_DISPLAY)
+bool showPoc = input.bool(true, "Show Prior POC", group = GROUP_DISPLAY)
+bool showSessionMarkers = input.bool(true, "Show Session Markers", group = GROUP_DISPLAY)
+bool showTradeLevels = input.bool(true, "Show Active SL / TP", group = GROUP_DISPLAY)
+bool showDebug = input.bool(false, "Show Debug Levels", group = GROUP_DISPLAY)
+bool showLvnLabels = input.bool(true, "Show LVN Labels", group = GROUP_DISPLAY)
+
+var array<float> sessionBarHighs = array.new_float()
+var array<float> sessionBarLows = array.new_float()
+var array<float> sessionBarVolumes = array.new_float()
+
+var array<float> profileVolumes = array.new_float()
+var array<float> profileRowLows = array.new_float()
+var array<float> profileRowHighs = array.new_float()
+
+var array<float> tradableCenters = array.new_float()
+var array<float> tradableLows = array.new_float()
+var array<float> tradableHighs = array.new_float()
+var array<float> tradableVolumes = array.new_float()
+var array<int> tradableRows = array.new_int()
+var array<bool> lvnUsedThisSession = array.new_bool()
+var array<label> lvnLabels = array.new<label>()
+
+var float buildSessionHigh = na
+var float buildSessionLow = na
+var float buildSessionVolume = 0.0
+var bool buildSessionHasPositiveVolume = false
+var bool buildSessionActive = false
+var bool skipCurrentBuild = false
+
+var float frozenSessionHigh = na
+var float frozenSessionLow = na
+var float frozenRowHeight = na
+var float previousPocPrice = na
+var float previousPocVolume = na
+var bool tradableProfileReady = false
+var string dataWarning = ""
+var bool anyTradeTakenThisSession = false
+
+var int activeTradeLvnIndex = -1
+var int activeTradeDirection = 0
+var string activeEntryId = ""
+var float activeStopPrice = na
+var float activeTargetPrice = na
+var label statusLabel = na
+
+f_long_entry_id(int rank) =>
+    "LVN-L-" + str.tostring(rank)
+
+f_short_entry_id(int rank) =>
+    "LVN-S-" + str.tostring(rank)
+
+f_exit_id(string entryId) =>
+    entryId + "-X"
+
+f_is_rank_enabled(int rank) =>
+    switch rank
+        1 => tradeLVN1
+        2 => tradeLVN2
+        3 => tradeLVN3
+        4 => tradeLVN4
+        5 => tradeLVN5
+        => false
+
+f_clear_label_array(array<label> labels) =>
+    if array.size(labels) > 0
+        for i = 0 to array.size(labels) - 1
+            label.delete(array.get(labels, i))
+    array.clear(labels)
+
+f_reset_usage_flags(array<bool> flags, int size) =>
+    array.clear(flags)
+    if size > 0
+        for i = 0 to size - 1
+            array.push(flags, false)
+
+f_cancel_rank_orders(int rank) =>
+    strategy.cancel(f_long_entry_id(rank))
+    strategy.cancel(f_short_entry_id(rank))
+
+f_cancel_all_entry_orders() =>
+    for rank = 1 to MAX_SUPPORTED_RANKS
+        f_cancel_rank_orders(rank)
+
+f_get_trade_levels(int direction, float entryPrice, float lvnLow, float lvnHigh) =>
+    float stopPrice = na
+    float targetPrice = na
+
+    if riskMode == "Fixed Points"
+        if direction == 1
+            stopPrice := entryPrice - fixedSLPoints
+            targetPrice := entryPrice + fixedTPPoints
+        else
+            stopPrice := entryPrice + fixedSLPoints
+            targetPrice := entryPrice - fixedTPPoints
+    else
+        if direction == 1
+            stopPrice := lvnLow - lvnBoundaryBuffer
+            float risk = entryPrice - stopPrice
+            if risk > 0
+                targetPrice := entryPrice + risk * rrMultiple
+        else
+            stopPrice := lvnHigh + lvnBoundaryBuffer
+            float risk = stopPrice - entryPrice
+            if risk > 0
+                targetPrice := entryPrice - risk * rrMultiple
+
+    [stopPrice, targetPrice]
+
+f_trade_levels_valid(int direction, float entryPrice, float stopPrice, float targetPrice) =>
+    direction == 1 ? (not na(stopPrice) and not na(targetPrice) and stopPrice < entryPrice and targetPrice > entryPrice) : (not na(stopPrice) and not na(targetPrice) and stopPrice > entryPrice and targetPrice < entryPrice)
+
+f_build_profile(array<float> srcHighs, array<float> srcLows, array<float> srcVolumes, float sessionHigh, float sessionLow, int rows, array<float> outVolumes, array<float> outRowLows, array<float> outRowHighs) =>
+    array.clear(outVolumes)
+    array.clear(outRowLows)
+    array.clear(outRowHighs)
+
+    bool validProfile = array.size(srcHighs) > 0 and not na(sessionHigh) and not na(sessionLow) and sessionHigh > sessionLow and rows > 0
+    float rowHeight = na
+    float totalVolume = 0.0
+    int pocIndex = -1
+    float pocVolume = na
+
+    if validProfile
+        rowHeight := (sessionHigh - sessionLow) / rows
+        validProfile := rowHeight > 0
+
+    if validProfile
+        for row = 0 to rows - 1
+            float rowLow = sessionLow + row * rowHeight
+            float rowHigh = row == rows - 1 ? sessionHigh : rowLow + rowHeight
+            array.push(outRowLows, rowLow)
+            array.push(outRowHighs, rowHigh)
+            array.push(outVolumes, 0.0)
+
+        for barIndex = 0 to array.size(srcHighs) - 1
+            float candleHigh = array.get(srcHighs, barIndex)
+            float candleLow = array.get(srcLows, barIndex)
+            float candleVolume = math.max(array.get(srcVolumes, barIndex), 0.0)
+            float candleRange = candleHigh - candleLow
+            totalVolume += candleVolume
+
+            if candleVolume > 0
+                if candleRange <= 0
+                    float clampedPrice = math.clamp(candleLow, sessionLow, sessionHigh)
+                    int rowIndex = int(math.floor((clampedPrice - sessionLow) / rowHeight))
+                    rowIndex := math.max(0, math.min(rows - 1, rowIndex))
+                    array.set(outVolumes, rowIndex, array.get(outVolumes, rowIndex) + candleVolume)
+                else
+                    for row = 0 to rows - 1
+                        float binLow = array.get(outRowLows, row)
+                        float binHigh = array.get(outRowHighs, row)
+                        float overlap = math.max(0.0, math.min(candleHigh, binHigh) - math.max(candleLow, binLow))
+                        if overlap > 0
+                            float allocatedVolume = candleVolume * overlap / candleRange
+                            array.set(outVolumes, row, array.get(outVolumes, row) + allocatedVolume)
+
+        float runningPocVolume = -1.0
+        for row = 0 to array.size(outVolumes) - 1
+            float rowVolume = array.get(outVolumes, row)
+            if rowVolume > runningPocVolume
+                runningPocVolume := rowVolume
+                pocIndex := row
+
+        pocVolume := pocIndex >= 0 ? array.get(outVolumes, pocIndex) : na
+
+    [validProfile, rowHeight, totalVolume, pocIndex, pocVolume]
+
+f_prepare_tradable_lvns(array<float> sourceVolumes, array<float> sourceRowLows, array<float> sourceRowHighs, int pocIndex, float pocVol) =>
+    array.clear(tradableCenters)
+    array.clear(tradableLows)
+    array.clear(tradableHighs)
+    array.clear(tradableVolumes)
+    array.clear(tradableRows)
+
+    int rowCount = array.size(sourceVolumes)
+    array<int> candidateRows = array.new_int()
+
+    if rowCount >= neighborWindow * 2 + 1 and pocIndex >= 0 and not na(pocVol) and pocVol > 0
+        for row = neighborWindow to rowCount - neighborWindow - 1
+            float currentVol = array.get(sourceVolumes, row)
+            bool localMin = true
+            float neighborTotal = 0.0
+            int neighborCount = 0
+
+            for offset = 1 to neighborWindow
+                float leftVol = array.get(sourceVolumes, row - offset)
+                float rightVol = array.get(sourceVolumes, row + offset)
+                localMin := localMin and currentVol < leftVol and currentVol < rightVol
+                neighborTotal += leftVol + rightVol
+                neighborCount += 2
+
+            float neighborAvg = neighborCount > 0 ? neighborTotal / neighborCount : na
+            bool depthPass = not na(neighborAvg) and currentVol <= neighborAvg * relativeDepthThreshold
+            bool pocPass = currentVol <= pocVol * pocVolumeThreshold
+
+            bool methodPass = switch lvnMethod
+                "Relative to POC" => localMin and pocPass
+                "Neighbor Threshold" => localMin and depthPass
+                => localMin
+
+            if methodPass
+                array.push(candidateRows, row)
+
+    array<int> selectedRows = array.new_int()
+
+    if array.size(candidateRows) > 0
+        for rankSlot = 0 to maxLvns - 1
+            int bestRow = -1
+            float bestVol = na
+
+            for candidateIndex = 0 to array.size(candidateRows) - 1
+                int candidateRow = array.get(candidateRows, candidateIndex)
+                float candidateVol = array.get(sourceVolumes, candidateRow)
+                bool farEnough = true
+
+                if array.size(selectedRows) > 0
+                    for selectedIndex = 0 to array.size(selectedRows) - 1
+                        farEnough := farEnough and math.abs(candidateRow - array.get(selectedRows, selectedIndex)) >= minSeparationRows
+
+                if farEnough and (bestRow == -1 or candidateVol < bestVol or (candidateVol == bestVol and candidateRow < bestRow))
+                    bestRow := candidateRow
+                    bestVol := candidateVol
+
+            if bestRow != -1
+                array.push(selectedRows, bestRow)
+                float rowLow = array.get(sourceRowLows, bestRow)
+                float rowHigh = array.get(sourceRowHighs, bestRow)
+                array.push(tradableCenters, (rowLow + rowHigh) * 0.5)
+                array.push(tradableLows, rowLow)
+                array.push(tradableHighs, rowHigh)
+                array.push(tradableVolumes, bestVol)
+                array.push(tradableRows, bestRow)
+
+    array.size(tradableCenters)
+
+int sessionStamp = time(timeframe.period, profileSession, sessionTimezone)
+bool timeframeOk = timeframe.isintraday
+bool withinDateRange = time >= startDate and time <= endDate
+bool inProfileSession = not na(sessionStamp)
+bool priorInSession = bar_index > 0 ? not na(sessionStamp[1]) : false
+bool isNewProfileSession = inProfileSession and not priorInSession
+bool isSessionJustEnded = not inProfileSession and priorInSession
+
+if isNewProfileSession
+    f_cancel_all_entry_orders()
+    anyTradeTakenThisSession := false
+    f_reset_usage_flags(lvnUsedThisSession, array.size(tradableCenters))
+    activeTradeLvnIndex := strategy.position_size == 0 ? -1 : activeTradeLvnIndex
+    buildSessionActive := true
+    skipCurrentBuild := false
+    buildSessionHigh := na
+    buildSessionLow := na
+    buildSessionVolume := 0.0
+    buildSessionHasPositiveVolume := false
+    array.clear(sessionBarHighs)
+    array.clear(sessionBarLows)
+    array.clear(sessionBarVolumes)
+else if inProfileSession and not buildSessionActive
+    f_cancel_all_entry_orders()
+    anyTradeTakenThisSession := false
+    f_reset_usage_flags(lvnUsedThisSession, array.size(tradableCenters))
+    buildSessionActive := true
+    skipCurrentBuild := true
+    buildSessionHigh := na
+    buildSessionLow := na
+    buildSessionVolume := 0.0
+    buildSessionHasPositiveVolume := false
+    array.clear(sessionBarHighs)
+    array.clear(sessionBarLows)
+    array.clear(sessionBarVolumes)
+    dataWarning := "Initial history started mid-session. The first detected profile is skipped to avoid freezing a partial session."
+
+if inProfileSession and buildSessionActive
+    float safeVolume = na(volume) ? 0.0 : volume
+    array.push(sessionBarHighs, high)
+    array.push(sessionBarLows, low)
+    array.push(sessionBarVolumes, safeVolume)
+    buildSessionHigh := na(buildSessionHigh) ? high : math.max(buildSessionHigh, high)
+    buildSessionLow := na(buildSessionLow) ? low : math.min(buildSessionLow, low)
+    buildSessionVolume += safeVolume
+    buildSessionHasPositiveVolume := buildSessionHasPositiveVolume or safeVolume > 0
+
+if isSessionJustEnded
+    f_cancel_all_entry_orders()
+
+    if closePositionsAtSessionEnd and strategy.position_size != 0
+        strategy.close_all(comment = "Session End")
+
+    if buildSessionActive and not skipCurrentBuild and buildSessionHasPositiveVolume
+        [validProfile, rowHeight, totalVolume, pocIndex, pocVol] = f_build_profile(sessionBarHighs, sessionBarLows, sessionBarVolumes, buildSessionHigh, buildSessionLow, profileRows, profileVolumes, profileRowLows, profileRowHighs)
+
+        if validProfile and totalVolume > 0 and pocIndex >= 0
+            frozenSessionHigh := buildSessionHigh
+            frozenSessionLow := buildSessionLow
+            frozenRowHeight := rowHeight
+            previousPocVolume := pocVol
+            previousPocPrice := (array.get(profileRowLows, pocIndex) + array.get(profileRowHighs, pocIndex)) * 0.5
+
+            int preparedCount = f_prepare_tradable_lvns(profileVolumes, profileRowLows, profileRowHighs, pocIndex, pocVol)
+            tradableProfileReady := preparedCount > 0
+            f_reset_usage_flags(lvnUsedThisSession, preparedCount)
+            dataWarning := preparedCount > 0 ? "" : "Profile completed, but no LVNs passed the current detection settings."
+        else
+            array.clear(tradableCenters)
+            array.clear(tradableLows)
+            array.clear(tradableHighs)
+            array.clear(tradableVolumes)
+            array.clear(tradableRows)
+            array.clear(profileVolumes)
+            array.clear(profileRowLows)
+            array.clear(profileRowHighs)
+            f_reset_usage_flags(lvnUsedThisSession, 0)
+            tradableProfileReady := false
+            previousPocPrice := na
+            previousPocVolume := na
+            dataWarning := "Skipped profile because the session range or allocated volume was invalid."
+    else
+        array.clear(tradableCenters)
+        array.clear(tradableLows)
+        array.clear(tradableHighs)
+        array.clear(tradableVolumes)
+        array.clear(tradableRows)
+        array.clear(profileVolumes)
+        array.clear(profileRowLows)
+        array.clear(profileRowHighs)
+        f_reset_usage_flags(lvnUsedThisSession, 0)
+        tradableProfileReady := false
+        previousPocPrice := na
+        previousPocVolume := na
+        dataWarning := skipCurrentBuild ? "Skipped an incomplete profile because the chart history started inside the session." : "Skipped profile because no usable volume was available."
+
+    buildSessionActive := false
+    skipCurrentBuild := false
+
+bool newLongPosition = strategy.position_size > 0 and strategy.position_size[1] <= 0
+bool newShortPosition = strategy.position_size < 0 and strategy.position_size[1] >= 0
+bool newPositionOpened = (newLongPosition or newShortPosition) and strategy.opentrades > 0
+bool positionClosed = strategy.position_size == 0 and strategy.position_size[1] != 0
+
+if newPositionOpened
+    activeEntryId := strategy.opentrades.entry_id(strategy.opentrades - 1)
+    activeTradeDirection := strategy.position_size > 0 ? 1 : -1
+    activeTradeLvnIndex := -1
+
+    if array.size(tradableCenters) > 0
+        for i = 0 to array.size(tradableCenters) - 1
+            int rank = i + 1
+            if activeEntryId == f_long_entry_id(rank) or activeEntryId == f_short_entry_id(rank)
+                activeTradeLvnIndex := i
+                if repeatTouchMode != "Allow repeated LVN trades" and i < array.size(lvnUsedThisSession)
+                    array.set(lvnUsedThisSession, i, true)
+                anyTradeTakenThisSession := true
+                break
+
+    f_cancel_all_entry_orders()
+
+if positionClosed
+    if activeEntryId != ""
+        strategy.cancel(f_exit_id(activeEntryId))
+    activeTradeLvnIndex := -1
+    activeTradeDirection := 0
+    activeEntryId := ""
+    activeStopPrice := na
+    activeTargetPrice := na
+
+bool canSubmitNewEntries = timeframeOk and withinDateRange and inProfileSession and tradableProfileReady and strategy.position_size == 0
+float referencePrice = bar_index > 0 ? close[1] : close
+
+if canSubmitNewEntries and array.size(tradableCenters) > 0
+    for i = 0 to array.size(tradableCenters) - 1
+        int rank = i + 1
+        float level = array.get(tradableCenters, i)
+        float levelLow = array.get(tradableLows, i)
+        float levelHigh = array.get(tradableHighs, i)
+
+        bool rankEnabled = f_is_rank_enabled(rank)
+        bool alreadyUsed = i < array.size(lvnUsedThisSession) ? array.get(lvnUsedThisSession, i) : false
+        bool tradeAllowedForRank = switch repeatTouchMode
+            "Allow repeated LVN trades" => true
+            "First LVN trade of session only" => not anyTradeTakenThisSession
+            => not alreadyUsed
+
+        bool approachFromAbove = referencePrice > level + minimumApproachDistance
+        bool approachFromBelow = referencePrice < level - minimumApproachDistance
+
+        [projectedLongStop, projectedLongTarget] = f_get_trade_levels(1, level, levelLow, levelHigh)
+        [projectedShortStop, projectedShortTarget] = f_get_trade_levels(-1, level, levelLow, levelHigh)
+        bool longRiskOk = f_trade_levels_valid(1, level, projectedLongStop, projectedLongTarget)
+        bool shortRiskOk = f_trade_levels_valid(-1, level, projectedShortStop, projectedShortTarget)
+
+        if rankEnabled and tradeAllowedForRank and approachFromAbove and longRiskOk
+            strategy.entry(f_long_entry_id(rank), strategy.long, qty = orderQty, limit = level, oca_name = ENTRY_OCA_GROUP, oca_type = strategy.oca.cancel, comment = "LVN " + str.tostring(rank) + " Long")
+            strategy.cancel(f_short_entry_id(rank))
+        else if rankEnabled and tradeAllowedForRank and approachFromBelow and shortRiskOk
+            strategy.entry(f_short_entry_id(rank), strategy.short, qty = orderQty, limit = level, oca_name = ENTRY_OCA_GROUP, oca_type = strategy.oca.cancel, comment = "LVN " + str.tostring(rank) + " Short")
+            strategy.cancel(f_long_entry_id(rank))
+        else
+            f_cancel_rank_orders(rank)
+else
+    f_cancel_all_entry_orders()
+
+if strategy.position_size != 0 and activeTradeLvnIndex >= 0 and activeTradeLvnIndex < array.size(tradableCenters)
+    float activeLvnLow = array.get(tradableLows, activeTradeLvnIndex)
+    float activeLvnHigh = array.get(tradableHighs, activeTradeLvnIndex)
+    [nextActiveStop, nextActiveTarget] = f_get_trade_levels(activeTradeDirection, strategy.position_avg_price, activeLvnLow, activeLvnHigh)
+    activeStopPrice := nextActiveStop
+    activeTargetPrice := nextActiveTarget
+
+    if f_trade_levels_valid(activeTradeDirection, strategy.position_avg_price, activeStopPrice, activeTargetPrice)
+        strategy.exit(f_exit_id(activeEntryId), from_entry = activeEntryId, stop = activeStopPrice, limit = activeTargetPrice, comment_profit = "TP", comment_loss = "SL")
+    else
+        strategy.close(activeEntryId, comment = "Invalid Risk")
+else
+    activeStopPrice := na
+    activeTargetPrice := na
+
+float lvn1 = array.size(tradableCenters) > 0 ? array.get(tradableCenters, 0) : na
+float lvn2 = array.size(tradableCenters) > 1 ? array.get(tradableCenters, 1) : na
+float lvn3 = array.size(tradableCenters) > 2 ? array.get(tradableCenters, 2) : na
+float lvn4 = array.size(tradableCenters) > 3 ? array.get(tradableCenters, 3) : na
+float lvn5 = array.size(tradableCenters) > 4 ? array.get(tradableCenters, 4) : na
+
+plot(showLvns ? lvn1 : na, "LVN Rank #1", color = color.new(color.teal, 0), linewidth = 2, style = plot.style_linebr)
+plot(showLvns ? lvn2 : na, "LVN Rank #2", color = color.new(color.green, 0), linewidth = 2, style = plot.style_linebr)
+plot(showLvns ? lvn3 : na, "LVN Rank #3", color = color.new(color.blue, 0), linewidth = 2, style = plot.style_linebr)
+plot(showLvns ? lvn4 : na, "LVN Rank #4", color = color.new(color.orange, 0), linewidth = 2, style = plot.style_linebr)
+plot(showLvns ? lvn5 : na, "LVN Rank #5", color = color.new(color.red, 0), linewidth = 2, style = plot.style_linebr)
+plot(showPoc ? previousPocPrice : na, "Prior Session POC", color = color.new(color.yellow, 0), linewidth = 2, style = plot.style_linebr)
+
+plot(showDebug ? frozenSessionHigh : na, "Frozen Session High", color = color.new(color.gray, 20), style = plot.style_linebr)
+plot(showDebug ? frozenSessionLow : na, "Frozen Session Low", color = color.new(color.gray, 20), style = plot.style_linebr)
+plot(showTradeLevels ? activeStopPrice : na, "Active Stop", color = color.new(color.red, 0), linewidth = 1, style = plot.style_linebr)
+plot(showTradeLevels ? activeTargetPrice : na, "Active Target", color = color.new(color.lime, 0), linewidth = 1, style = plot.style_linebr)
+
+bgcolor(showSessionMarkers and inProfileSession ? color.new(color.aqua, 94) : na, title = "Session Background")
+plotshape(showSessionMarkers and isNewProfileSession, title = "Session Start", style = shape.circle, size = size.tiny, color = color.new(color.aqua, 0), location = location.bottom, text = "18")
+plotshape(showSessionMarkers and isSessionJustEnded, title = "Session End", style = shape.circle, size = size.tiny, color = color.new(color.orange, 0), location = location.top, text = "16")
+plotshape(newLongPosition, title = "Long Entry Marker", style = shape.triangleup, location = location.belowbar, size = size.tiny, color = color.new(color.lime, 0), text = "L")
+plotshape(newShortPosition, title = "Short Entry Marker", style = shape.triangledown, location = location.abovebar, size = size.tiny, color = color.new(color.red, 0), text = "S")
+
+if barstate.islast
+    f_clear_label_array(lvnLabels)
+
+    if showLvnLabels and showLvns and array.size(tradableCenters) > 0
+        int labelsToDraw = math.min(array.size(tradableCenters), 5)
+        for i = 0 to labelsToDraw - 1
+            int rank = i + 1
+            float level = array.get(tradableCenters, i)
+            float relativePct = not na(previousPocVolume) and previousPocVolume > 0 ? array.get(tradableVolumes, i) / previousPocVolume * 100.0 : na
+            string text = "LVN Rank #" + str.tostring(rank) + "  " + str.tostring(level, format.mintick)
+            text += not na(relativePct) ? "\nVol vs POC: " + str.tostring(relativePct, "#.##") + "%" : ""
+            label labelId = label.new(bar_index, level, text = text, style = label.style_label_left, color = color.new(color.black, 20), textcolor = color.white, size = size.tiny)
+            array.push(lvnLabels, labelId)
+
+    if not na(statusLabel)
+        label.delete(statusLabel)
+        statusLabel := na
+
+    string warningText = ""
+    if not timeframeOk
+        warningText := "Use this strategy on intraday charts. Higher timeframes cannot rebuild a session profile reliably."
+    else if volumeAllocationMethod != "Chart-Bar Overlap Approximation"
+        warningText := "Unsupported volume allocation setting."
+    else if str.length(dataWarning) > 0
+        warningText := dataWarning
+
+    if str.length(warningText) > 0
+        statusLabel := label.new(bar_index, high, warningText, style = label.style_label_upper_left, color = color.new(color.red, 0), textcolor = color.white, size = size.small)
