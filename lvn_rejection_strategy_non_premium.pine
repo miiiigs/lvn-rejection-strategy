@@ -14,6 +14,7 @@ strategy(
     use_bar_magnifier = false,
     fill_orders_on_standard_ohlc = true,
     backtest_fill_limits_assumption = 0,
+    max_boxes_count = 100,
     max_lines_count = 100,
     max_labels_count = 100
 )
@@ -40,12 +41,14 @@ string profileSession = input.session("1800-1600", "Profile Session", group = GR
 string sessionTimezone = input.string("America/New_York", "Timezone", group = GROUP_SESSION)
 bool closePositionsAtSessionEnd = input.bool(true, "Close positions at session end", group = GROUP_SESSION)
 
-int profileRows = input.int(24, "Profile Rows", minval = 10, maxval = 300, group = GROUP_PROFILE)
+int profileRows = input.int(24, "Profile Rows", minval = 8, maxval = 200, group = GROUP_PROFILE)
 string profileCalculationMode = input.string("Chart Bar Approximation", "Profile Calculation", options = ["Chart Bar Approximation"], group = GROUP_PROFILE)
 
 string lvnMethod = input.string("Client Threshold Valley", "LVN Detection Method", options = ["Client Threshold Valley", "Local Minimum", "Relative to POC", "Neighbor Threshold"], group = GROUP_LVN)
 float lvnThresholdPct = input.float(40.0, "LVN Threshold (%)", minval = 1.0, maxval = 100.0, step = 1.0, group = GROUP_LVN)
 int surroundingRows = input.int(2, "Surrounding Rows Per Side", minval = 1, maxval = 5, group = GROUP_LVN)
+bool useContrastFilter = input.bool(false, "Use Minimum LVN Contrast", group = GROUP_LVN)
+float minContrastRatio = input.float(1.25, "Minimum Surrounding Volume Contrast", minval = 1.0, step = 0.05, group = GROUP_LVN)
 int neighborWindow = input.int(1, "Legacy Neighbor Window", minval = 1, maxval = 5, group = GROUP_LVN)
 float relativeDepthThreshold = input.float(0.50, "Legacy Neighbor Threshold", minval = 0.05, maxval = 2.0, step = 0.05, group = GROUP_LVN)
 float pocVolumeThreshold = input.float(0.25, "Legacy Max POC Volume Ratio", minval = 0.01, maxval = 1.0, step = 0.01, group = GROUP_LVN)
@@ -53,7 +56,7 @@ int minSeparationRows = input.int(2, "Minimum LVN Separation (rows)", minval = 0
 int maxLvns = input.int(MAX_SUPPORTED_RANKS, "Maximum Ranked LVNs", minval = 1, maxval = MAX_SUPPORTED_RANKS, group = GROUP_LVN)
 
 bool tradeLVN1 = input.bool(true, "Trade LVN #1", group = GROUP_SELECTION)
-bool tradeLVN2 = input.bool(true, "Trade LVN #2", group = GROUP_SELECTION)
+bool tradeLVN2 = input.bool(false, "Trade LVN #2", group = GROUP_SELECTION)
 bool tradeLVN3 = input.bool(false, "Trade LVN #3", group = GROUP_SELECTION)
 bool tradeLVN4 = input.bool(false, "Trade LVN #4", group = GROUP_SELECTION)
 bool tradeLVN5 = input.bool(false, "Trade LVN #5", group = GROUP_SELECTION)
@@ -66,7 +69,11 @@ bool tradeLVN10 = input.bool(false, "Trade LVN #10", group = GROUP_SELECTION)
 bool tradeLongs = input.bool(true, "Trade Longs", group = GROUP_ENTRY)
 bool tradeShorts = input.bool(true, "Trade Shorts", group = GROUP_ENTRY)
 float minimumApproachDistance = input.float(0.0, "Minimum Approach Distance", minval = 0.0, step = 0.01, group = GROUP_ENTRY)
-string repeatTouchMode = input.string("One trade per LVN per session", "Repeat Touch Handling", options = ["One trade per LVN per session", "First LVN trade of session only", "Allow repeated LVN trades"], group = GROUP_ENTRY)
+string lvnFreshnessMode = input.string("First Touch Only", "LVN Freshness Mode", options = ["First Touch Only", "One Trade Per LVN", "Allow Repeated Trades"], group = GROUP_ENTRY)
+bool useEntrySessionFilter = input.bool(false, "Use Entry Session Filter", group = GROUP_ENTRY)
+string entrySessionFilter = input.session("0930-1600", "Entry Session", group = GROUP_ENTRY)
+bool blockNewEntriesBeforeSessionEnd = input.bool(true, "Block New Entries Before Session End", group = GROUP_ENTRY)
+int entryCutoffMinutes = input.int(5, "Entry Cutoff Minutes", minval = 0, maxval = 120, group = GROUP_ENTRY)
 float orderQty = input.float(1.0, "Order Size", minval = 0.01, step = 0.01, group = GROUP_ENTRY)
 
 string riskMode = input.string("Fixed Points", "Risk Management", options = ["Fixed Points", "LVN Boundary + R"], group = GROUP_RISK)
@@ -74,11 +81,18 @@ float fixedSLPoints = input.float(5.0, "Fixed Stop Loss Points", minval = 0.0, s
 float fixedTPPoints = input.float(10.0, "Fixed Take Profit Points", minval = 0.0, step = 0.01, group = GROUP_RISK)
 float rrMultiple = input.float(1.5, "Reward / Risk Multiple", minval = 0.1, step = 0.1, group = GROUP_RISK)
 float lvnBoundaryBuffer = input.float(0.0, "LVN Boundary Buffer", minval = 0.0, step = 0.01, group = GROUP_RISK)
+bool usePocDistanceFilter = input.bool(false, "Use Minimum Distance From POC", group = GROUP_RISK)
+float minimumPocDistance = input.float(0.0, "Minimum Distance From POC", minval = 0.0, step = 0.01, group = GROUP_RISK)
+bool tradeLvnsAbovePoc = input.bool(true, "Trade LVNs Above POC", group = GROUP_RISK)
+bool tradeLvnsBelowPoc = input.bool(true, "Trade LVNs Below POC", group = GROUP_RISK)
 
 int startDate = input.time(timestamp("01 Jan 2024 00:00 +0000"), "Start Date", group = GROUP_BACKTEST)
 int endDate = input.time(timestamp("31 Dec 2099 23:59 +0000"), "End Date", group = GROUP_BACKTEST)
+string testLabel = input.string("Baseline", "Test Label", group = GROUP_BACKTEST)
 
 bool showLvns = input.bool(true, "Show LVNs", group = GROUP_DISPLAY)
+bool showVolumeProfileHistogram = input.bool(true, "Show Volume Profile Histogram", group = GROUP_DISPLAY)
+int profileVisualWidth = input.int(25, "Profile Visual Width", minval = 5, maxval = 80, group = GROUP_DISPLAY)
 bool showPoc = input.bool(true, "Show Prior POC", group = GROUP_DISPLAY)
 bool showSessionMarkers = input.bool(true, "Show Session Markers", group = GROUP_DISPLAY)
 bool showTradeLevels = input.bool(true, "Show Active SL / TP", group = GROUP_DISPLAY)
@@ -100,12 +114,18 @@ var array<float> tradableHighs = array.new_float()
 var array<float> tradableRegionAvgVolumes = array.new_float()
 var array<float> tradableRegionTotalVolumes = array.new_float()
 var array<float> tradableSurroundingAvgs = array.new_float()
+var array<float> tradableAverageAboveVolumes = array.new_float()
+var array<float> tradableAverageBelowVolumes = array.new_float()
 var array<float> tradableDepthRatios = array.new_float()
+var array<float> tradableContrastRatios = array.new_float()
 var array<int> tradableStartRows = array.new_int()
 var array<int> tradableEndRows = array.new_int()
 var array<int> tradableRegionWidths = array.new_int()
 var array<bool> lvnUsedThisSession = array.new_bool()
+var array<bool> pendingLongOrders = array.new_bool()
+var array<bool> pendingShortOrders = array.new_bool()
 var array<label> lvnLabels = array.new<label>()
+var array<box> profileBoxes = array.new<box>()
 
 var float buildSessionHigh = na
 var float buildSessionLow = na
@@ -131,6 +151,7 @@ var float activeStopPrice = na
 var float activeTargetPrice = na
 var label statusLabel = na
 var label debugLabel = na
+var int frozenProfileAnchorBarIndex = na
 
 f_long_entry_id(int rank) =>
     "LVN-L-" + str.tostring(rank)
@@ -161,7 +182,19 @@ f_clear_label_array(array<label> labels) =>
             label.delete(array.get(labels, i))
     array.clear(labels)
 
+f_clear_box_array(array<box> boxes) =>
+    if array.size(boxes) > 0
+        for i = 0 to array.size(boxes) - 1
+            box.delete(array.get(boxes, i))
+    array.clear(boxes)
+
 f_reset_usage_flags(array<bool> flags, int size) =>
+    array.clear(flags)
+    if size > 0
+        for i = 0 to size - 1
+            array.push(flags, false)
+
+f_reset_bool_flags(array<bool> flags, int size) =>
     array.clear(flags)
     if size > 0
         for i = 0 to size - 1
@@ -174,7 +207,10 @@ f_clear_tradable_lvns() =>
     array.clear(tradableRegionAvgVolumes)
     array.clear(tradableRegionTotalVolumes)
     array.clear(tradableSurroundingAvgs)
+    array.clear(tradableAverageAboveVolumes)
+    array.clear(tradableAverageBelowVolumes)
     array.clear(tradableDepthRatios)
+    array.clear(tradableContrastRatios)
     array.clear(tradableStartRows)
     array.clear(tradableEndRows)
     array.clear(tradableRegionWidths)
@@ -189,6 +225,7 @@ f_clear_frozen_profile_buffers() =>
     array.clear(profileVolumes)
     array.clear(profileRowLows)
     array.clear(profileRowHighs)
+    f_clear_box_array(profileBoxes)
 
 f_cancel_rank_orders(int rank) =>
     strategy.cancel(f_long_entry_id(rank))
@@ -200,6 +237,93 @@ f_cancel_all_entry_orders() =>
 
 f_lvn_entry_price(int direction, float lvnLow, float lvnHigh) =>
     direction == 1 ? lvnHigh : lvnLow
+
+f_lvn_strength_class(float depthRatio) =>
+    string strength = "Custom"
+    if not na(depthRatio)
+        if depthRatio <= 0.30
+            strength := "Very Strict"
+        else if depthRatio <= 0.40
+            strength := "Strong"
+        else if depthRatio <= 0.50
+            strength := "Moderate"
+        else
+            strength := "Shallow"
+    strength
+
+f_enabled_ranks_summary() =>
+    string enabledRanks = ""
+    for rank = 1 to MAX_SUPPORTED_RANKS
+        if f_is_rank_enabled(rank)
+            enabledRanks += str.length(enabledRanks) > 0 ? "," + str.tostring(rank) : str.tostring(rank)
+    str.length(enabledRanks) > 0 ? enabledRanks : "None"
+
+f_row_is_lvn(int rowIndex) =>
+    bool isLvnRow = false
+    if array.size(tradableStartRows) > 0
+        for i = 0 to array.size(tradableStartRows) - 1
+            int startRow = array.get(tradableStartRows, i)
+            int endRow = array.get(tradableEndRows, i)
+            isLvnRow := isLvnRow or (rowIndex >= startRow and rowIndex <= endRow)
+    isLvnRow
+
+f_draw_frozen_profile_histogram(int anchorBarIndex) =>
+    f_clear_box_array(profileBoxes)
+
+    if showVolumeProfileHistogram and array.size(profileVolumes) > 0 and array.size(profileRowLows) == array.size(profileVolumes) and array.size(profileRowHighs) == array.size(profileVolumes) and not na(anchorBarIndex)
+        float maxRowVolume = 0.0
+        int pocRowIndex = -1
+
+        for row = 0 to array.size(profileVolumes) - 1
+            float rowVolume = array.get(profileVolumes, row)
+            if rowVolume > maxRowVolume
+                maxRowVolume := rowVolume
+                pocRowIndex := row
+
+        if maxRowVolume > 0 and pocRowIndex >= 0
+            int profileRightEdge = anchorBarIndex - 1
+
+            for row = 0 to array.size(profileVolumes) - 1
+                float rowVolume = array.get(profileVolumes, row)
+                if rowVolume > 0
+                    float normalizedWidth = rowVolume / maxRowVolume
+                    int widthBars = math.max(1, int(math.round(normalizedWidth * profileVisualWidth)))
+                    int rowLeftEdge = profileRightEdge - widthBars
+                    float rowLow = array.get(profileRowLows, row)
+                    float rowHigh = array.get(profileRowHighs, row)
+                    bool isPocRow = row == pocRowIndex
+                    bool isLvnRow = f_row_is_lvn(row)
+                    color fillColor = isPocRow ? color.new(color.orange, 65) : isLvnRow ? color.new(color.red, 78) : color.new(color.blue, 82)
+                    color borderColor = isPocRow ? color.new(color.orange, 0) : isLvnRow ? color.new(color.red, 20) : color.new(color.blue, 55)
+                    box rowBox = box.new(rowLeftEdge, rowHigh, profileRightEdge, rowLow, xloc = xloc.bar_index, bgcolor = fillColor, border_color = borderColor, border_width = isPocRow ? 2 : 1)
+                    array.push(profileBoxes, rowBox)
+
+f_zone_touched(int direction, float entryPrice) =>
+    direction == 1 ? low <= entryPrice : high >= entryPrice
+
+f_poc_context_ok(float levelCenter) =>
+    bool distanceOk = not usePocDistanceFilter
+    bool sideOk = true
+
+    if not na(previousPocPrice)
+        float distanceFromPoc = math.abs(levelCenter - previousPocPrice)
+        distanceOk := not usePocDistanceFilter or distanceFromPoc >= minimumPocDistance
+
+        if levelCenter > previousPocPrice
+            sideOk := tradeLvnsAbovePoc
+        else if levelCenter < previousPocPrice
+            sideOk := tradeLvnsBelowPoc
+        else
+            sideOk := tradeLvnsAbovePoc or tradeLvnsBelowPoc
+
+    distanceOk and sideOk
+
+f_session_close_timestamp() =>
+    int closeYear = year(time_close, sessionTimezone)
+    int closeMonth = month(time_close, sessionTimezone)
+    int closeDay = dayofmonth(time_close, sessionTimezone)
+    int closeHour = hour(time_close, sessionTimezone)
+    closeHour >= 18 ? timestamp(sessionTimezone, closeYear, closeMonth, closeDay + 1, 16, 0) : timestamp(sessionTimezone, closeYear, closeMonth, closeDay, 16, 0)
 
 f_average_volume(array<float> src, int startIndex, int endIndex) =>
     float avgValue = na
@@ -229,7 +353,10 @@ f_push_candidate_region(
     array<float> outAvgVolumes,
     array<float> outTotalVolumes,
     array<float> outSurroundAvgs,
+    array<float> outAvgAbove,
+    array<float> outAvgBelow,
     array<float> outDepthRatios,
+    array<float> outContrastRatios,
     array<int> outWidths,
     int startRow,
     int endRow,
@@ -239,7 +366,10 @@ f_push_candidate_region(
     float regionAvgVolume,
     float regionTotalVolume,
     float surroundingAvg,
+    float averageAbove,
+    float averageBelow,
     float depthRatio,
+    float contrastRatio,
     int regionWidth
 ) =>
     array.push(outStartRows, startRow)
@@ -250,7 +380,10 @@ f_push_candidate_region(
     array.push(outAvgVolumes, regionAvgVolume)
     array.push(outTotalVolumes, regionTotalVolume)
     array.push(outSurroundAvgs, surroundingAvg)
+    array.push(outAvgAbove, averageAbove)
+    array.push(outAvgBelow, averageBelow)
     array.push(outDepthRatios, depthRatio)
+    array.push(outContrastRatios, contrastRatio)
     array.push(outWidths, regionWidth)
 
 f_build_profile_chart_bars(array<float> srcHighs, array<float> srcLows, array<float> srcVolumes, float sessionHigh, float sessionLow, int rows, array<float> outVolumes, array<float> outRowLows, array<float> outRowHighs) =>
@@ -326,7 +459,10 @@ f_detect_client_threshold_candidates(
     array<float> outAvgVolumes,
     array<float> outTotalVolumes,
     array<float> outSurroundAvgs,
+    array<float> outAvgAbove,
+    array<float> outAvgBelow,
     array<float> outDepthRatios,
+    array<float> outContrastRatios,
     array<int> outWidths
 ) =>
     int rowCount = array.size(sourceVolumes)
@@ -360,15 +496,17 @@ f_detect_client_threshold_candidates(
                     float regionAvgVolume = not na(regionTotalVolume) and regionWidth > 0 ? regionTotalVolume / regionWidth : na
                     float surroundingAvg = not na(avgBelow) and not na(avgAbove) ? (avgBelow + avgAbove) * 0.5 : na
                     bool bounded = not na(regionAvgVolume) and not na(surroundingAvg) and avgBelow > regionAvgVolume and avgAbove > regionAvgVolume
-                    bool qualifies = bounded and not na(regionAvgVolume) and not na(surroundingAvg) and regionAvgVolume <= surroundingAvg * threshold
+                    float depthRatio = not na(surroundingAvg) and surroundingAvg > 0 ? regionAvgVolume / surroundingAvg : na
+                    float contrastRatio = not na(regionAvgVolume) and regionAvgVolume > 0 ? surroundingAvg / regionAvgVolume : na
+                    bool contrastPass = not useContrastFilter or (not na(contrastRatio) and contrastRatio >= minContrastRatio)
+                    bool qualifies = bounded and contrastPass and not na(regionAvgVolume) and not na(surroundingAvg) and regionAvgVolume <= surroundingAvg * threshold
 
                     if qualifies and regionWidth > 0
                         float regionLow = array.get(sourceRowLows, startRow)
                         float regionHigh = array.get(sourceRowHighs, endRow)
                         float regionCenter = (regionLow + regionHigh) * 0.5
-                        float depthRatio = surroundingAvg > 0 ? regionAvgVolume / surroundingAvg : na
-                        if not na(depthRatio)
-                            f_push_candidate_region(outStartRows, outEndRows, outLows, outHighs, outCenters, outAvgVolumes, outTotalVolumes, outSurroundAvgs, outDepthRatios, outWidths, startRow, endRow, regionLow, regionHigh, regionCenter, regionAvgVolume, regionTotalVolume, surroundingAvg, depthRatio, regionWidth)
+                        if not na(depthRatio) and not na(contrastRatio)
+                            f_push_candidate_region(outStartRows, outEndRows, outLows, outHighs, outCenters, outAvgVolumes, outTotalVolumes, outSurroundAvgs, outAvgAbove, outAvgBelow, outDepthRatios, outContrastRatios, outWidths, startRow, endRow, regionLow, regionHigh, regionCenter, regionAvgVolume, regionTotalVolume, surroundingAvg, avgAbove, avgBelow, depthRatio, contrastRatio, regionWidth)
 
                 row := endRow + 1
             else
@@ -388,7 +526,10 @@ f_detect_legacy_candidates(
     array<float> outAvgVolumes,
     array<float> outTotalVolumes,
     array<float> outSurroundAvgs,
+    array<float> outAvgAbove,
+    array<float> outAvgBelow,
     array<float> outDepthRatios,
+    array<float> outContrastRatios,
     array<int> outWidths
 ) =>
     int rowCount = array.size(sourceVolumes)
@@ -421,7 +562,12 @@ f_detect_legacy_candidates(
                 float rowHigh = array.get(sourceRowHighs, row)
                 float rowCenter = (rowLow + rowHigh) * 0.5
                 float depthRatio = currentVol / surroundingAvg
-                f_push_candidate_region(outStartRows, outEndRows, outLows, outHighs, outCenters, outAvgVolumes, outTotalVolumes, outSurroundAvgs, outDepthRatios, outWidths, row, row, rowLow, rowHigh, rowCenter, currentVol, currentVol, surroundingAvg, depthRatio, 1)
+                float contrastRatio = currentVol > 0 ? surroundingAvg / currentVol : na
+                bool contrastPass = not useContrastFilter or (not na(contrastRatio) and contrastRatio >= minContrastRatio)
+                if contrastPass and not na(contrastRatio)
+                    float avgBelow = f_average_volume(sourceVolumes, row - neighborWindow, row - 1)
+                    float avgAbove = f_average_volume(sourceVolumes, row + 1, row + neighborWindow)
+                    f_push_candidate_region(outStartRows, outEndRows, outLows, outHighs, outCenters, outAvgVolumes, outTotalVolumes, outSurroundAvgs, outAvgAbove, outAvgBelow, outDepthRatios, outContrastRatios, outWidths, row, row, rowLow, rowHigh, rowCenter, currentVol, currentVol, surroundingAvg, avgAbove, avgBelow, depthRatio, contrastRatio, 1)
 
 f_is_region_separated(int candidateStartRow, int candidateEndRow) =>
     bool separated = true
@@ -444,13 +590,16 @@ f_prepare_tradable_lvns(array<float> sourceVolumes, array<float> sourceRowLows, 
     array<float> candidateAvgVolumes = array.new_float()
     array<float> candidateTotalVolumes = array.new_float()
     array<float> candidateSurroundAvgs = array.new_float()
+    array<float> candidateAvgAbove = array.new_float()
+    array<float> candidateAvgBelow = array.new_float()
     array<float> candidateDepthRatios = array.new_float()
+    array<float> candidateContrastRatios = array.new_float()
     array<int> candidateWidths = array.new_int()
 
     if lvnMethod == "Client Threshold Valley"
-        f_detect_client_threshold_candidates(sourceVolumes, sourceRowLows, sourceRowHighs, candidateStartRows, candidateEndRows, candidateLows, candidateHighs, candidateCenters, candidateAvgVolumes, candidateTotalVolumes, candidateSurroundAvgs, candidateDepthRatios, candidateWidths)
+        f_detect_client_threshold_candidates(sourceVolumes, sourceRowLows, sourceRowHighs, candidateStartRows, candidateEndRows, candidateLows, candidateHighs, candidateCenters, candidateAvgVolumes, candidateTotalVolumes, candidateSurroundAvgs, candidateAvgAbove, candidateAvgBelow, candidateDepthRatios, candidateContrastRatios, candidateWidths)
     else
-        f_detect_legacy_candidates(sourceVolumes, sourceRowLows, sourceRowHighs, pocIndex, pocVol, candidateStartRows, candidateEndRows, candidateLows, candidateHighs, candidateCenters, candidateAvgVolumes, candidateTotalVolumes, candidateSurroundAvgs, candidateDepthRatios, candidateWidths)
+        f_detect_legacy_candidates(sourceVolumes, sourceRowLows, sourceRowHighs, pocIndex, pocVol, candidateStartRows, candidateEndRows, candidateLows, candidateHighs, candidateCenters, candidateAvgVolumes, candidateTotalVolumes, candidateSurroundAvgs, candidateAvgAbove, candidateAvgBelow, candidateDepthRatios, candidateContrastRatios, candidateWidths)
 
     int candidateCount = array.size(candidateCenters)
     array<bool> selectedFlags = array.new_bool(candidateCount, false)
@@ -467,7 +616,7 @@ f_prepare_tradable_lvns(array<float> sourceVolumes, array<float> sourceRowLows, 
 
                     if separated
                         float candidateRatio = array.get(candidateDepthRatios, candidateIndex)
-                        float candidateContrast = array.get(candidateSurroundAvgs, candidateIndex) - array.get(candidateAvgVolumes, candidateIndex)
+                        float candidateContrast = array.get(candidateContrastRatios, candidateIndex)
                         int candidateWidth = array.get(candidateWidths, candidateIndex)
                         float candidateCenter = array.get(candidateCenters, candidateIndex)
 
@@ -475,7 +624,7 @@ f_prepare_tradable_lvns(array<float> sourceVolumes, array<float> sourceRowLows, 
                             bestIndex := candidateIndex
                         else
                             float bestRatio = array.get(candidateDepthRatios, bestIndex)
-                            float bestContrast = array.get(candidateSurroundAvgs, bestIndex) - array.get(candidateAvgVolumes, bestIndex)
+                            float bestContrast = array.get(candidateContrastRatios, bestIndex)
                             int bestWidth = array.get(candidateWidths, bestIndex)
                             float bestCenter = array.get(candidateCenters, bestIndex)
 
@@ -497,7 +646,10 @@ f_prepare_tradable_lvns(array<float> sourceVolumes, array<float> sourceRowLows, 
                 array.push(tradableRegionAvgVolumes, array.get(candidateAvgVolumes, bestIndex))
                 array.push(tradableRegionTotalVolumes, array.get(candidateTotalVolumes, bestIndex))
                 array.push(tradableSurroundingAvgs, array.get(candidateSurroundAvgs, bestIndex))
+                array.push(tradableAverageAboveVolumes, array.get(candidateAvgAbove, bestIndex))
+                array.push(tradableAverageBelowVolumes, array.get(candidateAvgBelow, bestIndex))
                 array.push(tradableDepthRatios, array.get(candidateDepthRatios, bestIndex))
+                array.push(tradableContrastRatios, array.get(candidateContrastRatios, bestIndex))
                 array.push(tradableRegionWidths, array.get(candidateWidths, bestIndex))
 
     array.size(tradableCenters)
@@ -532,9 +684,14 @@ f_trade_levels_valid(int direction, float entryPrice, float stopPrice, float tar
     direction == 1 ? (not na(stopPrice) and not na(targetPrice) and not na(riskDistance) and riskDistance > syminfo.mintick and stopPrice < entryPrice and targetPrice > entryPrice) : (not na(stopPrice) and not na(targetPrice) and not na(riskDistance) and riskDistance > syminfo.mintick and stopPrice > entryPrice and targetPrice < entryPrice)
 
 int sessionStamp = time(timeframe.period, profileSession, sessionTimezone)
+int entrySessionStamp = time(timeframe.period, entrySessionFilter, sessionTimezone)
 bool timeframeOk = timeframe.isintraday
 bool withinDateRange = time >= startDate and time <= endDate
 bool inProfileSession = not na(sessionStamp)
+bool inEntrySession = not useEntrySessionFilter or not na(entrySessionStamp)
+int sessionCloseTimestamp = f_session_close_timestamp()
+int minutesToSessionEnd = inProfileSession ? int(math.floor((sessionCloseTimestamp - time_close) / 60000)) : na
+bool entryCutoffActive = blockNewEntriesBeforeSessionEnd and inProfileSession and not na(minutesToSessionEnd) and minutesToSessionEnd <= entryCutoffMinutes
 bool priorInSession = bar_index > 0 ? not na(sessionStamp[1]) : false
 bool isNewProfileSession = inProfileSession and not priorInSession
 bool isSessionJustEnded = not inProfileSession and priorInSession
@@ -552,6 +709,13 @@ if isNewProfileSession
     buildSessionVolume := 0.0
     buildSessionHasPositiveVolume := false
     f_clear_build_profile_buffers()
+    f_reset_bool_flags(pendingLongOrders, array.size(tradableCenters))
+    f_reset_bool_flags(pendingShortOrders, array.size(tradableCenters))
+    frozenProfileAnchorBarIndex := tradableProfileReady and array.size(profileVolumes) > 0 ? bar_index : na
+    if not na(frozenProfileAnchorBarIndex)
+        f_draw_frozen_profile_histogram(frozenProfileAnchorBarIndex)
+    else
+        f_clear_box_array(profileBoxes)
 else if inProfileSession and not buildSessionActive
     f_cancel_all_entry_orders()
     anyTradeTakenThisSession := false
@@ -563,6 +727,10 @@ else if inProfileSession and not buildSessionActive
     buildSessionVolume := 0.0
     buildSessionHasPositiveVolume := false
     f_clear_build_profile_buffers()
+    f_reset_bool_flags(pendingLongOrders, array.size(tradableCenters))
+    f_reset_bool_flags(pendingShortOrders, array.size(tradableCenters))
+    frozenProfileAnchorBarIndex := na
+    f_clear_box_array(profileBoxes)
     dataWarning := "Initial history started mid-session. The first detected profile is skipped to avoid freezing a partial session."
 
 if inProfileSession and buildSessionActive
@@ -595,10 +763,15 @@ if isSessionJustEnded
             int preparedCount = f_prepare_tradable_lvns(profileVolumes, profileRowLows, profileRowHighs, pocIndex, pocVol)
             tradableProfileReady := preparedCount > 0
             f_reset_usage_flags(lvnUsedThisSession, preparedCount)
+            f_reset_bool_flags(pendingLongOrders, preparedCount)
+            f_reset_bool_flags(pendingShortOrders, preparedCount)
+            frozenProfileAnchorBarIndex := na
             dataWarning := preparedCount > 0 ? "" : "Profile completed, but no LVNs passed the current detection settings."
         else
             f_clear_frozen_profile_buffers()
             f_reset_usage_flags(lvnUsedThisSession, 0)
+            f_reset_bool_flags(pendingLongOrders, 0)
+            f_reset_bool_flags(pendingShortOrders, 0)
             tradableProfileReady := false
             frozenSessionHigh := na
             frozenSessionLow := na
@@ -606,10 +779,13 @@ if isSessionJustEnded
             previousPocPrice := na
             previousPocRow := na
             previousPocVolume := na
+            frozenProfileAnchorBarIndex := na
             dataWarning := "Skipped profile because the session range or allocated volume was invalid."
     else
         f_clear_frozen_profile_buffers()
         f_reset_usage_flags(lvnUsedThisSession, 0)
+        f_reset_bool_flags(pendingLongOrders, 0)
+        f_reset_bool_flags(pendingShortOrders, 0)
         tradableProfileReady := false
         frozenSessionHigh := na
         frozenSessionLow := na
@@ -617,6 +793,7 @@ if isSessionJustEnded
         previousPocPrice := na
         previousPocRow := na
         previousPocVolume := na
+        frozenProfileAnchorBarIndex := na
         dataWarning := skipCurrentBuild ? "Skipped an incomplete profile because the chart history started inside the session." : "Skipped profile because no usable volume was available."
 
     buildSessionActive := false
@@ -637,12 +814,14 @@ if newPositionOpened
             int rank = i + 1
             if activeEntryId == f_long_entry_id(rank) or activeEntryId == f_short_entry_id(rank)
                 activeTradeLvnIndex := i
-                if repeatTouchMode != "Allow repeated LVN trades" and i < array.size(lvnUsedThisSession)
+                if lvnFreshnessMode != "Allow Repeated Trades" and i < array.size(lvnUsedThisSession)
                     array.set(lvnUsedThisSession, i, true)
                 anyTradeTakenThisSession := true
                 break
 
     f_cancel_all_entry_orders()
+    f_reset_bool_flags(pendingLongOrders, 0)
+    f_reset_bool_flags(pendingShortOrders, 0)
 
 if positionClosed
     if activeEntryId != ""
@@ -653,42 +832,77 @@ if positionClosed
     activeStopPrice := na
     activeTargetPrice := na
 
-bool canSubmitNewEntries = timeframeOk and withinDateRange and inProfileSession and tradableProfileReady and strategy.position_size == 0
+bool canSubmitNewEntries = timeframeOk and withinDateRange and inProfileSession and inEntrySession and not entryCutoffActive and tradableProfileReady and strategy.position_size == 0
 float referencePrice = bar_index > 0 ? close[1] : close
 
 if canSubmitNewEntries and array.size(tradableCenters) > 0
+    array<bool> nextPendingLongOrders = array.new_bool()
+    array<bool> nextPendingShortOrders = array.new_bool()
+
     for i = 0 to array.size(tradableCenters) - 1
         int rank = i + 1
+        float levelCenter = array.get(tradableCenters, i)
         float levelLow = array.get(tradableLows, i)
         float levelHigh = array.get(tradableHighs, i)
+        float depthRatio = array.get(tradableDepthRatios, i)
+        float contrastRatio = array.get(tradableContrastRatios, i)
 
         bool rankEnabled = f_is_rank_enabled(rank)
         bool alreadyUsed = i < array.size(lvnUsedThisSession) ? array.get(lvnUsedThisSession, i) : false
-        bool tradeAllowedForRank = switch repeatTouchMode
-            "Allow repeated LVN trades" => true
-            "First LVN trade of session only" => not anyTradeTakenThisSession
-            => not alreadyUsed
+        bool hadPendingLongOrder = i < array.size(pendingLongOrders) ? array.get(pendingLongOrders, i) : false
+        bool hadPendingShortOrder = i < array.size(pendingShortOrders) ? array.get(pendingShortOrders, i) : false
+        bool tradeAllowedForRank = lvnFreshnessMode == "Allow Repeated Trades" or not alreadyUsed
 
         float longEntryPrice = f_lvn_entry_price(1, levelLow, levelHigh)
         float shortEntryPrice = f_lvn_entry_price(-1, levelLow, levelHigh)
         bool approachFromAbove = referencePrice > levelHigh + minimumApproachDistance
         bool approachFromBelow = referencePrice < levelLow - minimumApproachDistance
+        bool pocContextOk = f_poc_context_ok(levelCenter)
+        bool longTouchedWithActiveOrder = hadPendingLongOrder and f_zone_touched(1, longEntryPrice)
+        bool shortTouchedWithActiveOrder = hadPendingShortOrder and f_zone_touched(-1, shortEntryPrice)
+        bool consumedThisBar = false
 
         [projectedLongStop, projectedLongTarget] = f_get_trade_levels(1, longEntryPrice, levelLow, levelHigh)
         [projectedShortStop, projectedShortTarget] = f_get_trade_levels(-1, shortEntryPrice, levelLow, levelHigh)
         bool longRiskOk = tradeLongs and f_trade_levels_valid(1, longEntryPrice, projectedLongStop, projectedLongTarget)
         bool shortRiskOk = tradeShorts and f_trade_levels_valid(-1, shortEntryPrice, projectedShortStop, projectedShortTarget)
+        string depthComment = str.tostring(depthRatio * 100.0, "#")
+        string contrastComment = str.tostring(contrastRatio, "#.#")
 
-        if rankEnabled and tradeAllowedForRank and approachFromAbove and longRiskOk
-            strategy.entry(f_long_entry_id(rank), strategy.long, qty = orderQty, limit = longEntryPrice, oca_name = ENTRY_OCA_GROUP, oca_type = strategy.oca.cancel, comment = "LVN " + str.tostring(rank) + " Long")
+        if rankEnabled and tradeAllowedForRank and pocContextOk and approachFromAbove and longRiskOk
+            strategy.entry(f_long_entry_id(rank), strategy.long, qty = orderQty, limit = longEntryPrice, oca_name = ENTRY_OCA_GROUP, oca_type = strategy.oca.cancel, comment = "LVN" + str.tostring(rank) + "-L D" + depthComment + " C" + contrastComment)
             strategy.cancel(f_short_entry_id(rank))
-        else if rankEnabled and tradeAllowedForRank and approachFromBelow and shortRiskOk
-            strategy.entry(f_short_entry_id(rank), strategy.short, qty = orderQty, limit = shortEntryPrice, oca_name = ENTRY_OCA_GROUP, oca_type = strategy.oca.cancel, comment = "LVN " + str.tostring(rank) + " Short")
+            bool keepLongPending = true
+            if lvnFreshnessMode == "First Touch Only" and longTouchedWithActiveOrder and i < array.size(lvnUsedThisSession)
+                array.set(lvnUsedThisSession, i, true)
+                consumedThisBar := true
+                keepLongPending := false
+            array.push(nextPendingLongOrders, keepLongPending and not consumedThisBar)
+            array.push(nextPendingShortOrders, false)
+        else if rankEnabled and tradeAllowedForRank and pocContextOk and approachFromBelow and shortRiskOk
+            strategy.entry(f_short_entry_id(rank), strategy.short, qty = orderQty, limit = shortEntryPrice, oca_name = ENTRY_OCA_GROUP, oca_type = strategy.oca.cancel, comment = "LVN" + str.tostring(rank) + "-S D" + depthComment + " C" + contrastComment)
             strategy.cancel(f_long_entry_id(rank))
+            bool keepShortPending = true
+            if lvnFreshnessMode == "First Touch Only" and shortTouchedWithActiveOrder and i < array.size(lvnUsedThisSession)
+                array.set(lvnUsedThisSession, i, true)
+                consumedThisBar := true
+                keepShortPending := false
+            array.push(nextPendingLongOrders, false)
+            array.push(nextPendingShortOrders, keepShortPending and not consumedThisBar)
         else
             f_cancel_rank_orders(rank)
+            array.push(nextPendingLongOrders, false)
+            array.push(nextPendingShortOrders, false)
+
+    array.clear(pendingLongOrders)
+    array.clear(pendingShortOrders)
+    for i = 0 to array.size(nextPendingLongOrders) - 1
+        array.push(pendingLongOrders, array.get(nextPendingLongOrders, i))
+        array.push(pendingShortOrders, array.get(nextPendingShortOrders, i))
 else
     f_cancel_all_entry_orders()
+    f_reset_bool_flags(pendingLongOrders, 0)
+    f_reset_bool_flags(pendingShortOrders, 0)
 
 if strategy.position_size != 0 and activeTradeLvnIndex >= 0 and activeTradeLvnIndex < array.size(tradableCenters)
     float activeLvnLow = array.get(tradableLows, activeTradeLvnIndex)
@@ -811,14 +1025,21 @@ if barstate.islast
             float level = array.get(tradableCenters, i)
             float lowerBoundary = array.get(tradableLows, i)
             float upperBoundary = array.get(tradableHighs, i)
+            float avgAbove = array.get(tradableAverageAboveVolumes, i)
+            float avgBelow = array.get(tradableAverageBelowVolumes, i)
             float depthRatio = array.get(tradableDepthRatios, i)
+            float contrastRatio = array.get(tradableContrastRatios, i)
             float surroundingAvg = array.get(tradableSurroundingAvgs, i)
             float avgVolume = array.get(tradableRegionAvgVolumes, i)
+            string strengthClass = f_lvn_strength_class(depthRatio)
             string labelText = "LVN Rank #" + str.tostring(rank) + "  " + str.tostring(level, format.mintick)
             labelText += "\nZone: " + str.tostring(lowerBoundary, format.mintick) + " - " + str.tostring(upperBoundary, format.mintick)
             labelText += "\nDepth: " + str.tostring(depthRatio * 100.0, "#.##") + "%"
+            labelText += "\nContrast: " + str.tostring(contrastRatio, "#.##") + "x"
+            labelText += "\nClass: " + strengthClass
             labelText += "\nLVN Avg: " + str.tostring(avgVolume, "#.##")
             labelText += "\nSurround Avg: " + str.tostring(surroundingAvg, "#.##")
+            labelText += "\nAbove/Below: " + str.tostring(avgAbove, "#.##") + " / " + str.tostring(avgBelow, "#.##")
             label labelId = label.new(bar_index, level, text = labelText, style = label.style_label_left, color = color.new(color.black, 20), textcolor = color.white, size = size.tiny)
             array.push(lvnLabels, labelId)
 
@@ -842,16 +1063,52 @@ if barstate.islast
         statusLabel := label.new(bar_index, high, warningText, style = label.style_label_upper_left, color = color.new(color.red, 0), textcolor = color.white, size = size.small)
 
     if showDebug
-        string debugText = "LVN Method: " + lvnMethod
+        string debugText = "Test: " + testLabel
+        debugText += "\nSymbol: " + syminfo.tickerid
+        debugText += "\nTimeframe: " + timeframe.period
+        debugText += "\nSession: " + profileSession + " " + sessionTimezone
+        debugText += "\nRows: " + str.tostring(profileRows)
+        debugText += "\nEnabled Ranks: " + f_enabled_ranks_summary()
+        debugText += "\nLongs / Shorts: " + (tradeLongs ? "On" : "Off") + " / " + (tradeShorts ? "On" : "Off")
+        debugText += "\nHistogram: " + (showVolumeProfileHistogram ? "On " + str.tostring(profileVisualWidth) + " bars" : "Off")
+        debugText += "\nLVN Method: " + lvnMethod
         debugText += "\nRows: " + str.tostring(profileRows)
         debugText += "\nThreshold: " + str.tostring(lvnThresholdPct, "#.##") + "%"
         debugText += "\nSurrounding Rows: " + str.tostring(surroundingRows)
+        debugText += "\nContrast Filter: " + (useContrastFilter ? "On >= " + str.tostring(minContrastRatio, "#.##") + "x" : "Off")
+        debugText += "\nFreshness: " + lvnFreshnessMode
+        debugText += "\nApproach Distance: " + str.tostring(minimumApproachDistance, "#.##")
+        debugText += "\nEntry Cutoff: " + (blockNewEntriesBeforeSessionEnd ? "On " + str.tostring(entryCutoffMinutes) + "m" : "Off")
+        debugText += "\nEntry Session Filter: " + (useEntrySessionFilter ? entrySessionFilter : "Off")
+        debugText += "\nPOC Filter: " + ((usePocDistanceFilter or not tradeLvnsAbovePoc or not tradeLvnsBelowPoc) ? "Custom" : "Off")
+        debugText += "\nPOC Distance Min: " + str.tostring(minimumPocDistance, "#.##")
+        debugText += "\nPOC Above / Below: " + (tradeLvnsAbovePoc ? "On" : "Off") + " / " + (tradeLvnsBelowPoc ? "On" : "Off")
+        debugText += "\nRisk Mode: " + riskMode
+        debugText += riskMode == "Fixed Points" ? "\nFixed SL / TP: " + str.tostring(fixedSLPoints, "#.##") + " / " + str.tostring(fixedTPPoints, "#.##") : "\nR / Buffer: " + str.tostring(rrMultiple, "#.##") + " / " + str.tostring(lvnBoundaryBuffer, "#.##")
+        debugText += "\nOrder Size: " + str.tostring(orderQty, "#.##")
         debugText += "\nFrozen High: " + (not na(frozenSessionHigh) ? str.tostring(frozenSessionHigh, format.mintick) : "na")
         debugText += "\nFrozen Low: " + (not na(frozenSessionLow) ? str.tostring(frozenSessionLow, format.mintick) : "na")
         debugText += "\nRow Height: " + (not na(frozenRowHeight) ? str.tostring(frozenRowHeight, format.mintick) : "na")
         debugText += "\nPOC Row: " + (not na(previousPocRow) ? str.tostring(previousPocRow) : "na")
+        debugText += "\nMinutes To Session End: " + (not na(minutesToSessionEnd) ? str.tostring(minutesToSessionEnd) : "na")
         debugText += "\nDetected LVNs: " + str.tostring(array.size(tradableCenters))
         if array.size(tradableCenters) > 0
             debugText += "\nTop Depth: " + str.tostring(array.get(tradableDepthRatios, 0) * 100.0, "#.##") + "%"
+            debugText += "\nTop Contrast: " + str.tostring(array.get(tradableContrastRatios, 0), "#.##") + "x"
+            debugText += "\nTop Class: " + f_lvn_strength_class(array.get(tradableDepthRatios, 0))
             debugText += "\nTop Zone: " + str.tostring(array.get(tradableLows, 0), format.mintick) + " - " + str.tostring(array.get(tradableHighs, 0), format.mintick)
+        if strategy.position_size != 0
+            float activeRiskPoints = not na(activeStopPrice) ? math.abs(strategy.position_avg_price - activeStopPrice) : na
+            float activeRewardPoints = not na(activeTargetPrice) ? math.abs(activeTargetPrice - strategy.position_avg_price) : na
+            float actualRMultiple = not na(activeRiskPoints) and activeRiskPoints > syminfo.mintick and not na(activeRewardPoints) ? activeRewardPoints / activeRiskPoints : na
+            debugText += "\nActive Entry: " + str.tostring(strategy.position_avg_price, format.mintick)
+            debugText += "\nActive Stop: " + (not na(activeStopPrice) ? str.tostring(activeStopPrice, format.mintick) : "na")
+            debugText += "\nActive Target: " + (not na(activeTargetPrice) ? str.tostring(activeTargetPrice, format.mintick) : "na")
+            debugText += "\nRisk / Reward Pts: " + (not na(activeRiskPoints) ? str.tostring(activeRiskPoints, "#.##") : "na") + " / " + (not na(activeRewardPoints) ? str.tostring(activeRewardPoints, "#.##") : "na")
+            debugText += "\nActual R: " + (not na(actualRMultiple) ? str.tostring(actualRMultiple, "#.##") : "na")
+            if activeTradeLvnIndex >= 0 and activeTradeLvnIndex < array.size(tradableCenters)
+                debugText += "\nActive LVN Zone: " + str.tostring(array.get(tradableLows, activeTradeLvnIndex), format.mintick) + " - " + str.tostring(array.get(tradableHighs, activeTradeLvnIndex), format.mintick)
+                if riskMode == "Fixed Points"
+                    bool fixedRiskMatch = not na(activeRiskPoints) and not na(activeRewardPoints) and math.abs(activeRiskPoints - fixedSLPoints) <= syminfo.mintick and math.abs(activeRewardPoints - fixedTPPoints) <= syminfo.mintick
+                    debugText += "\nFixed Risk Match: " + (fixedRiskMatch ? "Yes" : "No")
         debugLabel := label.new(bar_index, low, text = debugText, style = label.style_label_lower_left, color = color.new(color.navy, 15), textcolor = color.white, size = size.small)

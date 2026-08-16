@@ -30,6 +30,8 @@ Defaults:
 - `40%` = strong
 - `50%` = moderate
 - `Surrounding Rows Per Side = 2`
+- `Use Minimum LVN Contrast = Off`
+- `Minimum Surrounding Volume Contrast = 1.25`
 
 Exact surrounding-volume calculation:
 
@@ -42,6 +44,8 @@ Qualification rule:
 - `candidateRegionAverageVolume <= surroundingAverage * (lvnThresholdPct / 100.0)`
 - `averageBelow > candidateRegionAverageVolume`
 - `averageAbove > candidateRegionAverageVolume`
+- Optional contrast filter:
+  - `surroundingAverage / candidateRegionAverageVolume >= minContrastRatio`
 
 This boundary check is meant to avoid classifying profile tails as valid LVNs.
 
@@ -55,7 +59,10 @@ This boundary check is meant to avoid classifying profile tails as valid LVNs.
   - average LVN volume
   - total LVN volume
   - surrounding average volume
+  - average volume above
+  - average volume below
   - depth ratio
+  - contrast ratio
   - row span
 
 Ranking method:
@@ -67,7 +74,10 @@ Ranking method:
 
 Depth ratio is `candidateRegionAverageVolume / surroundingAverage`.
 
+Contrast ratio is `surroundingAverage / candidateRegionAverageVolume`.
+
 Lower ratios represent deeper or stronger LVNs.
+Higher contrast ratios represent stronger separation from surrounding volume.
 
 Legacy diagnostic methods are still available:
 
@@ -90,6 +100,19 @@ Additional directional controls:
 - `Trade Longs`
 - `Trade Shorts`
 
+Freshness / repeat controls:
+
+- `First Touch Only`: the first eligible zone contact only consumes the LVN if a resting order was already active before that touch
+- `One Trade Per LVN`: the LVN stays available until it actually produces a trade, then becomes disabled for the session
+- `Allow Repeated Trades`: the LVN can re-arm after exit
+
+Optional entry-window control:
+
+- `Use Entry Session Filter`
+- `Entry Session`
+- `Block New Entries Before Session End`
+- `Entry Cutoff Minutes`
+
 ## Risk
 
 Supported risk modes:
@@ -109,6 +132,13 @@ LVN Boundary + R:
 - Target uses the resulting risk distance times `Reward / Risk Multiple`
 - Trades are rejected when risk is less than or equal to `syminfo.mintick`
 
+Optional POC context filters:
+
+- `Use Minimum Distance From POC`
+- `Minimum Distance From POC`
+- `Trade LVNs Above POC`
+- `Trade LVNs Below POC`
+
 ## Backtesting And Reliability
 
 - Start and end date filters are preserved
@@ -123,14 +153,15 @@ LVN Boundary + R:
 
 The scripts can display:
 
+- a frozen 24-row volume profile histogram built from the same row volumes used for LVN detection
 - frozen LVN zone upper and lower boundaries
 - optional center line
 - previous session POC
 - session start and end markers
 - active stop and target
-- LVN labels with depth and surrounding-volume context
+- LVN labels with depth, contrast, class, and surrounding-volume context
 
-`Show Debug Diagnostics` is off by default and exposes profile-validation details such as frozen high and low, row height, POC row, detected LVN count, and top-zone metadata.
+`Show Debug Diagnostics` is off by default and exposes profile-validation details such as frozen high and low, row height, POC row, detected LVN count, top-zone metadata, contrast-filter status, freshness mode, and active session or POC filters.
 
 ## Methodology Disclosure
 
@@ -141,6 +172,75 @@ TradingView's built-in volume profiles use lower-timeframe data internally. The 
 Detected levels may differ from TradingView's native Fixed Range Volume Profile.
 
 Historical fills may also differ between the premium and non-premium variants because Bar Magnifier access and lower-timeframe historical detail are TradingView-plan dependent.
+
+## Visual Profile Validation
+
+To compare the custom profile against TradingView's native Fixed Range Volume Profile:
+
+1. Enable `Show Volume Profile Histogram`.
+2. Manually draw TradingView's Fixed Range Volume Profile over the same `18:00 -> 16:00 America/New_York` session.
+3. Set TradingView FRVP to `24` rows.
+4. Compare the custom histogram row-by-row against the FRVP shape.
+5. Compare the POC row and the detected LVN zones.
+
+Current visualization notes:
+
+- The histogram uses the exact frozen row-volume array that also drives the strategy's LVNs.
+- The most recent frozen profile is displayed next to the beginning of the following session and remains stationary once drawn.
+- Row width is normalized by `rowVolume / maxRowVolume`, where `maxRowVolume` is typically the POC row volume.
+- The POC row is highlighted separately and LVN rows are tinted so valleys are easier to compare visually.
+
+Differences can still occur because the current custom engine uses chart-bar overlap allocation rather than TradingView's internal native FRVP methodology.
+
+## Recommended First Validation Test
+
+Use this baseline first:
+
+- Symbol: `CME_MINI:MNQ1!`
+- Timeframe: `1 minute`
+- Rows: `24`
+- LVN Method: `Client Threshold Valley`
+- Threshold: `40%`
+- Surrounding Rows: `2`
+- Contrast Filter: `Off`
+- LVN #1: `On`
+- LVN #2-#10: `Off`
+- Longs: `On`
+- Shorts: `On`
+- Freshness: `First Touch Only`
+- Approach Distance: `0`
+- Entry Session Filter: `Off`
+- Risk: `Fixed Points`
+- SL: `5`
+- TP: `10`
+- POC Filters: `Off`
+- Order Size: `1`
+- Debug: `On` during validation
+
+Run separate tests for `LVN #1`, `LVN #2`, and `LVN #3` rather than enabling several ranks at once.
+
+## Controlled Testing Checklist
+
+- A. `LVN #1 only`, `40%`, `Fixed 5 / 10`
+- B. `LVN #2 only`, `40%`, `Fixed 5 / 10`
+- C. `LVN #3 only`, `40%`, `Fixed 5 / 10`
+- D. `LVN #1 only`, `30%`
+- E. `LVN #1 only`, `50%`
+- F. `LVN #1`, `Fixed 5 / 10`
+- G. `LVN #1`, `Boundary + 1.5R`
+
+Only change one variable at a time between comparisons.
+
+Record:
+
+- Trade count
+- Net P/L
+- Win rate
+- Profit factor
+- Max drawdown
+- Average trade
+
+Do not treat a configuration as superior when the sample size is still very small.
 
 ## Current Status
 
