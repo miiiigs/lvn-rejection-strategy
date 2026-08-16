@@ -320,7 +320,7 @@ f_row_lvn_index(int rowIndex) =>
 
 f_draw_frozen_profile_histogram(int anchorBarIndex) =>
     f_clear_box_array(profileBoxes)
-    frozenRenderedRowCount := 0
+    int renderedRowCount = 0
 
     if (showVolumeProfileHistogram or nativeFrvpComparisonMode) and array.size(profileVolumes) > 0 and array.size(profileRowLows) == array.size(profileVolumes) and array.size(profileRowHighs) == array.size(profileVolumes) and not na(anchorBarIndex)
         float maxRowVolume = 0.0
@@ -349,7 +349,9 @@ f_draw_frozen_profile_histogram(int anchorBarIndex) =>
                     color borderColor = isPocRow ? color.new(color.orange, 0) : isLvnRow ? color.new(color.red, 20) : color.new(color.blue, 55)
                     box rowBox = box.new(rowLeftEdge, rowHigh, profileRightEdge, rowLow, xloc = xloc.bar_index, bgcolor = fillColor, border_color = borderColor, border_width = isPocRow ? 2 : 1)
                     array.push(profileBoxes, rowBox)
-                    frozenRenderedRowCount += 1
+                    renderedRowCount += 1
+
+    renderedRowCount
 
 f_update_row_diagnostics_table() =>
     table.clear(rowDiagnosticsTable, 0, 0, 7, 204)
@@ -807,9 +809,10 @@ if isNewProfileSession
     f_reset_bool_flags(pendingShortOrders, array.size(tradableCenters))
     frozenProfileAnchorBarIndex := tradableProfileReady and array.size(profileVolumes) > 0 ? bar_index : na
     if not na(frozenProfileAnchorBarIndex)
-        f_draw_frozen_profile_histogram(frozenProfileAnchorBarIndex)
+        frozenRenderedRowCount := f_draw_frozen_profile_histogram(frozenProfileAnchorBarIndex)
     else
         f_clear_box_array(profileBoxes)
+        frozenRenderedRowCount := 0
 else if inProfileSession and not buildSessionActive
     f_cancel_all_entry_orders()
     anyTradeTakenThisSession := false
