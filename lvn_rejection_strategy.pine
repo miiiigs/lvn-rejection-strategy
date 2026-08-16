@@ -93,10 +93,12 @@ string testLabel = input.string("Baseline", "Test Label", group = GROUP_BACKTEST
 bool showLvns = input.bool(true, "Show LVNs", group = GROUP_DISPLAY)
 bool showVolumeProfileHistogram = input.bool(true, "Show Volume Profile Histogram", group = GROUP_DISPLAY)
 int profileVisualWidth = input.int(25, "Profile Visual Width", minval = 5, maxval = 80, group = GROUP_DISPLAY)
+bool nativeFrvpComparisonMode = input.bool(false, "Native FRVP Comparison Mode", group = GROUP_DISPLAY)
 bool showPoc = input.bool(true, "Show Prior POC", group = GROUP_DISPLAY)
 bool showSessionMarkers = input.bool(true, "Show Session Markers", group = GROUP_DISPLAY)
 bool showTradeLevels = input.bool(true, "Show Active SL / TP", group = GROUP_DISPLAY)
 bool showDebug = input.bool(false, "Show Debug Diagnostics", group = GROUP_DISPLAY)
+bool showRowDiagnostics = input.bool(false, "Show Row Diagnostics", group = GROUP_DISPLAY)
 bool showLvnLabels = input.bool(true, "Show LVN Labels", group = GROUP_DISPLAY)
 bool shadeLvnZones = input.bool(true, "Shade LVN Zones", group = GROUP_DISPLAY)
 
@@ -126,6 +128,7 @@ var array<bool> pendingLongOrders = array.new_bool()
 var array<bool> pendingShortOrders = array.new_bool()
 var array<label> lvnLabels = array.new<label>()
 var array<box> profileBoxes = array.new<box>()
+var table rowDiagnosticsTable = table.new(position.top_right, 8, 205, border_width = 1)
 
 var float buildSessionHigh = na
 var float buildSessionLow = na
@@ -137,9 +140,17 @@ var bool skipCurrentBuild = false
 var float frozenSessionHigh = na
 var float frozenSessionLow = na
 var float frozenRowHeight = na
+var float frozenProfileRange = na
 var float previousPocPrice = na
 var int previousPocRow = na
 var float previousPocVolume = na
+var float frozenSourceSessionVolume = na
+var float frozenProfileVolumeSum = na
+var float frozenVolumeConservationErrorPct = na
+var float frozenMaxRowVolume = na
+var int frozenRenderedRowCount = 0
+var int frozenSessionStartTime = na
+var int frozenSessionEndTime = na
 var bool tradableProfileReady = false
 var string dataWarning = ""
 var bool anyTradeTakenThisSession = false
@@ -152,6 +163,8 @@ var float activeTargetPrice = na
 var label statusLabel = na
 var label debugLabel = na
 var int frozenProfileAnchorBarIndex = na
+var int buildSessionStartTime = na
+var int buildSessionEndTime = na
 
 f_long_entry_id(int rank) =>
     "LVN-L-" + str.tostring(rank)
@@ -258,6 +271,33 @@ f_enabled_ranks_summary() =>
             enabledRanks += str.length(enabledRanks) > 0 ? "," + str.tostring(rank) : str.tostring(rank)
     str.length(enabledRanks) > 0 ? enabledRanks : "None"
 
+f_format_timestamp(int ts) =>
+    string formatted = "na"
+    if not na(ts)
+        string yearText = str.tostring(year(ts, sessionTimezone))
+        string monthText = str.tostring(month(ts, sessionTimezone), "00")
+        string dayText = str.tostring(dayofmonth(ts, sessionTimezone), "00")
+        string hourText = str.tostring(hour(ts, sessionTimezone), "00")
+        string minuteText = str.tostring(minute(ts, sessionTimezone), "00")
+        formatted := yearText + "-" + monthText + "-" + dayText + " " + hourText + ":" + minuteText
+    formatted
+
+f_format_date(int ts) =>
+    string formatted = "na"
+    if not na(ts)
+        string yearText = str.tostring(year(ts, sessionTimezone))
+        string monthText = str.tostring(month(ts, sessionTimezone), "00")
+        string dayText = str.tostring(dayofmonth(ts, sessionTimezone), "00")
+        formatted := yearText + "-" + monthText + "-" + dayText
+    formatted
+
+f_configuration_fingerprint() =>
+    string rankSummary = f_enabled_ranks_summary()
+    string directionSummary = tradeLongs and tradeShorts ? "BOTH" : tradeLongs ? "LONG" : tradeShorts ? "SHORT" : "OFF"
+    string riskSummary = riskMode == "Fixed Points" ? "FIX" + str.tostring(fixedSLPoints, "#.##") + "x" + str.tostring(fixedTPPoints, "#.##") : "BR" + str.tostring(rrMultiple, "#.##")
+    string histogramSummary = showVolumeProfileHistogram or nativeFrvpComparisonMode ? "HIST" : "NOHIST"
+    timeframe.period + " | R" + str.tostring(profileRows) + " | T" + str.tostring(lvnThresholdPct, "#") + " | S" + str.tostring(surroundingRows) + " | LVN" + rankSummary + " | " + directionSummary + " | " + lvnFreshnessMode + " | " + riskSummary + " | " + histogramSummary
+
 f_row_is_lvn(int rowIndex) =>
     bool isLvnRow = false
     if array.size(tradableStartRows) > 0
@@ -267,10 +307,22 @@ f_row_is_lvn(int rowIndex) =>
             isLvnRow := isLvnRow or (rowIndex >= startRow and rowIndex <= endRow)
     isLvnRow
 
+f_row_lvn_index(int rowIndex) =>
+    int lvnIndex = -1
+    if array.size(tradableStartRows) > 0
+        for i = 0 to array.size(tradableStartRows) - 1
+            int startRow = array.get(tradableStartRows, i)
+            int endRow = array.get(tradableEndRows, i)
+            if rowIndex >= startRow and rowIndex <= endRow
+                lvnIndex := i
+                break
+    lvnIndex
+
 f_draw_frozen_profile_histogram(int anchorBarIndex) =>
     f_clear_box_array(profileBoxes)
+    frozenRenderedRowCount := 0
 
-    if showVolumeProfileHistogram and array.size(profileVolumes) > 0 and array.size(profileRowLows) == array.size(profileVolumes) and array.size(profileRowHighs) == array.size(profileVolumes) and not na(anchorBarIndex)
+    if (showVolumeProfileHistogram or nativeFrvpComparisonMode) and array.size(profileVolumes) > 0 and array.size(profileRowLows) == array.size(profileVolumes) and array.size(profileRowHighs) == array.size(profileVolumes) and not na(anchorBarIndex)
         float maxRowVolume = 0.0
         int pocRowIndex = -1
 
@@ -297,6 +349,46 @@ f_draw_frozen_profile_histogram(int anchorBarIndex) =>
                     color borderColor = isPocRow ? color.new(color.orange, 0) : isLvnRow ? color.new(color.red, 20) : color.new(color.blue, 55)
                     box rowBox = box.new(rowLeftEdge, rowHigh, profileRightEdge, rowLow, xloc = xloc.bar_index, bgcolor = fillColor, border_color = borderColor, border_width = isPocRow ? 2 : 1)
                     array.push(profileBoxes, rowBox)
+                    frozenRenderedRowCount += 1
+
+f_update_row_diagnostics_table() =>
+    table.clear(rowDiagnosticsTable, 0, 0, 7, 204)
+
+    bool showDiagnostics = showDebug and (showRowDiagnostics or nativeFrvpComparisonMode)
+    if showDiagnostics
+        table.cell(rowDiagnosticsTable, 0, 0, "Row", text_color = color.white, bgcolor = color.new(color.navy, 0))
+        table.cell(rowDiagnosticsTable, 1, 0, "Low", text_color = color.white, bgcolor = color.new(color.navy, 0))
+        table.cell(rowDiagnosticsTable, 2, 0, "High", text_color = color.white, bgcolor = color.new(color.navy, 0))
+        table.cell(rowDiagnosticsTable, 3, 0, "Vol", text_color = color.white, bgcolor = color.new(color.navy, 0))
+        table.cell(rowDiagnosticsTable, 4, 0, "%POC", text_color = color.white, bgcolor = color.new(color.navy, 0))
+        table.cell(rowDiagnosticsTable, 5, 0, "LVN?", text_color = color.white, bgcolor = color.new(color.navy, 0))
+        table.cell(rowDiagnosticsTable, 6, 0, "Depth", text_color = color.white, bgcolor = color.new(color.navy, 0))
+        table.cell(rowDiagnosticsTable, 7, 0, "Contrast", text_color = color.white, bgcolor = color.new(color.navy, 0))
+
+        if array.size(profileVolumes) > 0
+            float pocVol = not na(previousPocVolume) ? previousPocVolume : frozenMaxRowVolume
+            int rowCount = array.size(profileVolumes)
+            for displayIndex = 0 to rowCount - 1
+                int row = rowCount - 1 - displayIndex
+                int tableRow = displayIndex + 1
+                float rowLow = array.get(profileRowLows, row)
+                float rowHigh = array.get(profileRowHighs, row)
+                float rowVolume = array.get(profileVolumes, row)
+                float rowPctOfPoc = not na(pocVol) and pocVol > 0 ? rowVolume / pocVol * 100.0 : na
+                int lvnIndex = f_row_lvn_index(row)
+                string lvnFlag = lvnIndex >= 0 ? "Y" : ""
+                string depthText = lvnIndex >= 0 ? str.tostring(array.get(tradableDepthRatios, lvnIndex), "#.###") : ""
+                string contrastText = lvnIndex >= 0 ? str.tostring(array.get(tradableContrastRatios, lvnIndex), "#.##") : ""
+                color rowBg = lvnIndex >= 0 ? color.new(color.red, 88) : color.new(color.black, 92)
+
+                table.cell(rowDiagnosticsTable, 0, tableRow, str.tostring(row + 1), text_color = color.white, bgcolor = rowBg)
+                table.cell(rowDiagnosticsTable, 1, tableRow, str.tostring(rowLow, format.mintick), text_color = color.white, bgcolor = rowBg)
+                table.cell(rowDiagnosticsTable, 2, tableRow, str.tostring(rowHigh, format.mintick), text_color = color.white, bgcolor = rowBg)
+                table.cell(rowDiagnosticsTable, 3, tableRow, str.tostring(rowVolume, "#.##"), text_color = color.white, bgcolor = rowBg)
+                table.cell(rowDiagnosticsTable, 4, tableRow, not na(rowPctOfPoc) ? str.tostring(rowPctOfPoc, "#.##") + "%" : "", text_color = color.white, bgcolor = rowBg)
+                table.cell(rowDiagnosticsTable, 5, tableRow, lvnFlag, text_color = color.white, bgcolor = rowBg)
+                table.cell(rowDiagnosticsTable, 6, tableRow, depthText, text_color = color.white, bgcolor = rowBg)
+                table.cell(rowDiagnosticsTable, 7, tableRow, contrastText, text_color = color.white, bgcolor = rowBg)
 
 f_zone_touched(int direction, float entryPrice) =>
     direction == 1 ? low <= entryPrice : high >= entryPrice
@@ -708,6 +800,8 @@ if isNewProfileSession
     buildSessionLow := na
     buildSessionVolume := 0.0
     buildSessionHasPositiveVolume := false
+    buildSessionStartTime := na
+    buildSessionEndTime := na
     f_clear_build_profile_buffers()
     f_reset_bool_flags(pendingLongOrders, array.size(tradableCenters))
     f_reset_bool_flags(pendingShortOrders, array.size(tradableCenters))
@@ -726,6 +820,8 @@ else if inProfileSession and not buildSessionActive
     buildSessionLow := na
     buildSessionVolume := 0.0
     buildSessionHasPositiveVolume := false
+    buildSessionStartTime := na
+    buildSessionEndTime := na
     f_clear_build_profile_buffers()
     f_reset_bool_flags(pendingLongOrders, array.size(tradableCenters))
     f_reset_bool_flags(pendingShortOrders, array.size(tradableCenters))
@@ -738,6 +834,8 @@ if inProfileSession and buildSessionActive
     array.push(sessionBarHighs, high)
     array.push(sessionBarLows, low)
     array.push(sessionBarVolumes, safeVolume)
+    buildSessionStartTime := na(buildSessionStartTime) ? time : buildSessionStartTime
+    buildSessionEndTime := time_close
     buildSessionHigh := na(buildSessionHigh) ? high : math.max(buildSessionHigh, high)
     buildSessionLow := na(buildSessionLow) ? low : math.min(buildSessionLow, low)
     buildSessionVolume += safeVolume
@@ -756,9 +854,16 @@ if isSessionJustEnded
             frozenSessionHigh := buildSessionHigh
             frozenSessionLow := buildSessionLow
             frozenRowHeight := rowHeight
+            frozenProfileRange := buildSessionHigh - buildSessionLow
             previousPocVolume := pocVol
             previousPocRow := pocIndex
             previousPocPrice := (array.get(profileRowLows, pocIndex) + array.get(profileRowHighs, pocIndex)) * 0.5
+            frozenSourceSessionVolume := totalVolume
+            frozenSessionStartTime := buildSessionStartTime
+            frozenSessionEndTime := buildSessionEndTime
+            frozenMaxRowVolume := pocVol
+            frozenProfileVolumeSum := array.size(profileVolumes) > 0 ? f_sum_volume(profileVolumes, 0, array.size(profileVolumes) - 1) : na
+            frozenVolumeConservationErrorPct := not na(frozenSourceSessionVolume) and frozenSourceSessionVolume > 0 and not na(frozenProfileVolumeSum) ? math.abs(frozenProfileVolumeSum - frozenSourceSessionVolume) / frozenSourceSessionVolume * 100.0 : na
 
             int preparedCount = f_prepare_tradable_lvns(profileVolumes, profileRowLows, profileRowHighs, pocIndex, pocVol)
             tradableProfileReady := preparedCount > 0
@@ -776,9 +881,17 @@ if isSessionJustEnded
             frozenSessionHigh := na
             frozenSessionLow := na
             frozenRowHeight := na
+            frozenProfileRange := na
             previousPocPrice := na
             previousPocRow := na
             previousPocVolume := na
+            frozenSourceSessionVolume := na
+            frozenProfileVolumeSum := na
+            frozenVolumeConservationErrorPct := na
+            frozenMaxRowVolume := na
+            frozenRenderedRowCount := 0
+            frozenSessionStartTime := na
+            frozenSessionEndTime := na
             frozenProfileAnchorBarIndex := na
             dataWarning := "Skipped profile because the session range or allocated volume was invalid."
     else
@@ -790,9 +903,17 @@ if isSessionJustEnded
         frozenSessionHigh := na
         frozenSessionLow := na
         frozenRowHeight := na
+        frozenProfileRange := na
         previousPocPrice := na
         previousPocRow := na
         previousPocVolume := na
+        frozenSourceSessionVolume := na
+        frozenProfileVolumeSum := na
+        frozenVolumeConservationErrorPct := na
+        frozenMaxRowVolume := na
+        frozenRenderedRowCount := 0
+        frozenSessionStartTime := na
+        frozenSessionEndTime := na
         frozenProfileAnchorBarIndex := na
         dataWarning := skipCurrentBuild ? "Skipped an incomplete profile because the chart history started inside the session." : "Skipped profile because no usable volume was available."
 
@@ -952,73 +1073,81 @@ float lvnHigh8 = array.size(tradableHighs) > 7 ? array.get(tradableHighs, 7) : n
 float lvnHigh9 = array.size(tradableHighs) > 8 ? array.get(tradableHighs, 8) : na
 float lvnHigh10 = array.size(tradableHighs) > 9 ? array.get(tradableHighs, 9) : na
 
-lvnUpperPlot1 = plot(showLvns ? lvnHigh1 : na, "LVN Rank #1 Upper", color = color.new(color.teal, 0), linewidth = 2, style = plot.style_linebr)
-lvnLowerPlot1 = plot(showLvns ? lvnLow1 : na, "LVN Rank #1 Lower", color = color.new(color.teal, 0), linewidth = 2, style = plot.style_linebr)
-plot(showLvns ? lvnCenter1 : na, "LVN Rank #1 Center", color = color.new(color.teal, 55), linewidth = 1, style = plot.style_linebr)
+bool showLvnsForDisplay = showLvns or nativeFrvpComparisonMode
+bool showPocForDisplay = showPoc or nativeFrvpComparisonMode
+bool showProfileBoundsForDisplay = showDebug or nativeFrvpComparisonMode
+bool showTradeLevelsForDisplay = showTradeLevels and not nativeFrvpComparisonMode
+bool showSessionMarkersForDisplay = showSessionMarkers or nativeFrvpComparisonMode
+bool showEntryMarkersForDisplay = not nativeFrvpComparisonMode
 
-lvnUpperPlot2 = plot(showLvns ? lvnHigh2 : na, "LVN Rank #2 Upper", color = color.new(color.green, 0), linewidth = 2, style = plot.style_linebr)
-lvnLowerPlot2 = plot(showLvns ? lvnLow2 : na, "LVN Rank #2 Lower", color = color.new(color.green, 0), linewidth = 2, style = plot.style_linebr)
-plot(showLvns ? lvnCenter2 : na, "LVN Rank #2 Center", color = color.new(color.green, 55), linewidth = 1, style = plot.style_linebr)
+lvnUpperPlot1 = plot(showLvnsForDisplay ? lvnHigh1 : na, "LVN Rank #1 Upper", color = color.new(color.teal, 0), linewidth = 2, style = plot.style_linebr)
+lvnLowerPlot1 = plot(showLvnsForDisplay ? lvnLow1 : na, "LVN Rank #1 Lower", color = color.new(color.teal, 0), linewidth = 2, style = plot.style_linebr)
+plot(showLvnsForDisplay ? lvnCenter1 : na, "LVN Rank #1 Center", color = color.new(color.teal, 55), linewidth = 1, style = plot.style_linebr)
 
-lvnUpperPlot3 = plot(showLvns ? lvnHigh3 : na, "LVN Rank #3 Upper", color = color.new(color.blue, 0), linewidth = 2, style = plot.style_linebr)
-lvnLowerPlot3 = plot(showLvns ? lvnLow3 : na, "LVN Rank #3 Lower", color = color.new(color.blue, 0), linewidth = 2, style = plot.style_linebr)
-plot(showLvns ? lvnCenter3 : na, "LVN Rank #3 Center", color = color.new(color.blue, 55), linewidth = 1, style = plot.style_linebr)
+lvnUpperPlot2 = plot(showLvnsForDisplay ? lvnHigh2 : na, "LVN Rank #2 Upper", color = color.new(color.green, 0), linewidth = 2, style = plot.style_linebr)
+lvnLowerPlot2 = plot(showLvnsForDisplay ? lvnLow2 : na, "LVN Rank #2 Lower", color = color.new(color.green, 0), linewidth = 2, style = plot.style_linebr)
+plot(showLvnsForDisplay ? lvnCenter2 : na, "LVN Rank #2 Center", color = color.new(color.green, 55), linewidth = 1, style = plot.style_linebr)
 
-lvnUpperPlot4 = plot(showLvns ? lvnHigh4 : na, "LVN Rank #4 Upper", color = color.new(color.orange, 0), linewidth = 2, style = plot.style_linebr)
-lvnLowerPlot4 = plot(showLvns ? lvnLow4 : na, "LVN Rank #4 Lower", color = color.new(color.orange, 0), linewidth = 2, style = plot.style_linebr)
-plot(showLvns ? lvnCenter4 : na, "LVN Rank #4 Center", color = color.new(color.orange, 55), linewidth = 1, style = plot.style_linebr)
+lvnUpperPlot3 = plot(showLvnsForDisplay ? lvnHigh3 : na, "LVN Rank #3 Upper", color = color.new(color.blue, 0), linewidth = 2, style = plot.style_linebr)
+lvnLowerPlot3 = plot(showLvnsForDisplay ? lvnLow3 : na, "LVN Rank #3 Lower", color = color.new(color.blue, 0), linewidth = 2, style = plot.style_linebr)
+plot(showLvnsForDisplay ? lvnCenter3 : na, "LVN Rank #3 Center", color = color.new(color.blue, 55), linewidth = 1, style = plot.style_linebr)
 
-lvnUpperPlot5 = plot(showLvns ? lvnHigh5 : na, "LVN Rank #5 Upper", color = color.new(color.red, 0), linewidth = 2, style = plot.style_linebr)
-lvnLowerPlot5 = plot(showLvns ? lvnLow5 : na, "LVN Rank #5 Lower", color = color.new(color.red, 0), linewidth = 2, style = plot.style_linebr)
-plot(showLvns ? lvnCenter5 : na, "LVN Rank #5 Center", color = color.new(color.red, 55), linewidth = 1, style = plot.style_linebr)
+lvnUpperPlot4 = plot(showLvnsForDisplay ? lvnHigh4 : na, "LVN Rank #4 Upper", color = color.new(color.orange, 0), linewidth = 2, style = plot.style_linebr)
+lvnLowerPlot4 = plot(showLvnsForDisplay ? lvnLow4 : na, "LVN Rank #4 Lower", color = color.new(color.orange, 0), linewidth = 2, style = plot.style_linebr)
+plot(showLvnsForDisplay ? lvnCenter4 : na, "LVN Rank #4 Center", color = color.new(color.orange, 55), linewidth = 1, style = plot.style_linebr)
 
-lvnUpperPlot6 = plot(showLvns ? lvnHigh6 : na, "LVN Rank #6 Upper", color = color.new(color.fuchsia, 0), linewidth = 2, style = plot.style_linebr)
-lvnLowerPlot6 = plot(showLvns ? lvnLow6 : na, "LVN Rank #6 Lower", color = color.new(color.fuchsia, 0), linewidth = 2, style = plot.style_linebr)
-plot(showLvns ? lvnCenter6 : na, "LVN Rank #6 Center", color = color.new(color.fuchsia, 55), linewidth = 1, style = plot.style_linebr)
+lvnUpperPlot5 = plot(showLvnsForDisplay ? lvnHigh5 : na, "LVN Rank #5 Upper", color = color.new(color.red, 0), linewidth = 2, style = plot.style_linebr)
+lvnLowerPlot5 = plot(showLvnsForDisplay ? lvnLow5 : na, "LVN Rank #5 Lower", color = color.new(color.red, 0), linewidth = 2, style = plot.style_linebr)
+plot(showLvnsForDisplay ? lvnCenter5 : na, "LVN Rank #5 Center", color = color.new(color.red, 55), linewidth = 1, style = plot.style_linebr)
 
-lvnUpperPlot7 = plot(showLvns ? lvnHigh7 : na, "LVN Rank #7 Upper", color = color.new(color.purple, 0), linewidth = 2, style = plot.style_linebr)
-lvnLowerPlot7 = plot(showLvns ? lvnLow7 : na, "LVN Rank #7 Lower", color = color.new(color.purple, 0), linewidth = 2, style = plot.style_linebr)
-plot(showLvns ? lvnCenter7 : na, "LVN Rank #7 Center", color = color.new(color.purple, 55), linewidth = 1, style = plot.style_linebr)
+lvnUpperPlot6 = plot(showLvnsForDisplay ? lvnHigh6 : na, "LVN Rank #6 Upper", color = color.new(color.fuchsia, 0), linewidth = 2, style = plot.style_linebr)
+lvnLowerPlot6 = plot(showLvnsForDisplay ? lvnLow6 : na, "LVN Rank #6 Lower", color = color.new(color.fuchsia, 0), linewidth = 2, style = plot.style_linebr)
+plot(showLvnsForDisplay ? lvnCenter6 : na, "LVN Rank #6 Center", color = color.new(color.fuchsia, 55), linewidth = 1, style = plot.style_linebr)
 
-lvnUpperPlot8 = plot(showLvns ? lvnHigh8 : na, "LVN Rank #8 Upper", color = color.new(color.yellow, 0), linewidth = 2, style = plot.style_linebr)
-lvnLowerPlot8 = plot(showLvns ? lvnLow8 : na, "LVN Rank #8 Lower", color = color.new(color.yellow, 0), linewidth = 2, style = plot.style_linebr)
-plot(showLvns ? lvnCenter8 : na, "LVN Rank #8 Center", color = color.new(color.yellow, 55), linewidth = 1, style = plot.style_linebr)
+lvnUpperPlot7 = plot(showLvnsForDisplay ? lvnHigh7 : na, "LVN Rank #7 Upper", color = color.new(color.purple, 0), linewidth = 2, style = plot.style_linebr)
+lvnLowerPlot7 = plot(showLvnsForDisplay ? lvnLow7 : na, "LVN Rank #7 Lower", color = color.new(color.purple, 0), linewidth = 2, style = plot.style_linebr)
+plot(showLvnsForDisplay ? lvnCenter7 : na, "LVN Rank #7 Center", color = color.new(color.purple, 55), linewidth = 1, style = plot.style_linebr)
 
-lvnUpperPlot9 = plot(showLvns ? lvnHigh9 : na, "LVN Rank #9 Upper", color = color.new(color.navy, 0), linewidth = 2, style = plot.style_linebr)
-lvnLowerPlot9 = plot(showLvns ? lvnLow9 : na, "LVN Rank #9 Lower", color = color.new(color.navy, 0), linewidth = 2, style = plot.style_linebr)
-plot(showLvns ? lvnCenter9 : na, "LVN Rank #9 Center", color = color.new(color.navy, 55), linewidth = 1, style = plot.style_linebr)
+lvnUpperPlot8 = plot(showLvnsForDisplay ? lvnHigh8 : na, "LVN Rank #8 Upper", color = color.new(color.yellow, 0), linewidth = 2, style = plot.style_linebr)
+lvnLowerPlot8 = plot(showLvnsForDisplay ? lvnLow8 : na, "LVN Rank #8 Lower", color = color.new(color.yellow, 0), linewidth = 2, style = plot.style_linebr)
+plot(showLvnsForDisplay ? lvnCenter8 : na, "LVN Rank #8 Center", color = color.new(color.yellow, 55), linewidth = 1, style = plot.style_linebr)
 
-lvnUpperPlot10 = plot(showLvns ? lvnHigh10 : na, "LVN Rank #10 Upper", color = color.new(color.silver, 0), linewidth = 2, style = plot.style_linebr)
-lvnLowerPlot10 = plot(showLvns ? lvnLow10 : na, "LVN Rank #10 Lower", color = color.new(color.silver, 0), linewidth = 2, style = plot.style_linebr)
-plot(showLvns ? lvnCenter10 : na, "LVN Rank #10 Center", color = color.new(color.silver, 55), linewidth = 1, style = plot.style_linebr)
+lvnUpperPlot9 = plot(showLvnsForDisplay ? lvnHigh9 : na, "LVN Rank #9 Upper", color = color.new(color.navy, 0), linewidth = 2, style = plot.style_linebr)
+lvnLowerPlot9 = plot(showLvnsForDisplay ? lvnLow9 : na, "LVN Rank #9 Lower", color = color.new(color.navy, 0), linewidth = 2, style = plot.style_linebr)
+plot(showLvnsForDisplay ? lvnCenter9 : na, "LVN Rank #9 Center", color = color.new(color.navy, 55), linewidth = 1, style = plot.style_linebr)
 
-fill(lvnUpperPlot1, lvnLowerPlot1, color = showLvns and shadeLvnZones ? color.new(color.teal, 88) : na, title = "LVN Rank #1 Zone")
-fill(lvnUpperPlot2, lvnLowerPlot2, color = showLvns and shadeLvnZones ? color.new(color.green, 88) : na, title = "LVN Rank #2 Zone")
-fill(lvnUpperPlot3, lvnLowerPlot3, color = showLvns and shadeLvnZones ? color.new(color.blue, 88) : na, title = "LVN Rank #3 Zone")
-fill(lvnUpperPlot4, lvnLowerPlot4, color = showLvns and shadeLvnZones ? color.new(color.orange, 88) : na, title = "LVN Rank #4 Zone")
-fill(lvnUpperPlot5, lvnLowerPlot5, color = showLvns and shadeLvnZones ? color.new(color.red, 88) : na, title = "LVN Rank #5 Zone")
-fill(lvnUpperPlot6, lvnLowerPlot6, color = showLvns and shadeLvnZones ? color.new(color.fuchsia, 88) : na, title = "LVN Rank #6 Zone")
-fill(lvnUpperPlot7, lvnLowerPlot7, color = showLvns and shadeLvnZones ? color.new(color.purple, 88) : na, title = "LVN Rank #7 Zone")
-fill(lvnUpperPlot8, lvnLowerPlot8, color = showLvns and shadeLvnZones ? color.new(color.yellow, 88) : na, title = "LVN Rank #8 Zone")
-fill(lvnUpperPlot9, lvnLowerPlot9, color = showLvns and shadeLvnZones ? color.new(color.navy, 88) : na, title = "LVN Rank #9 Zone")
-fill(lvnUpperPlot10, lvnLowerPlot10, color = showLvns and shadeLvnZones ? color.new(color.silver, 88) : na, title = "LVN Rank #10 Zone")
-plot(showPoc ? previousPocPrice : na, "Prior Session POC", color = color.new(color.yellow, 0), linewidth = 2, style = plot.style_linebr)
+lvnUpperPlot10 = plot(showLvnsForDisplay ? lvnHigh10 : na, "LVN Rank #10 Upper", color = color.new(color.silver, 0), linewidth = 2, style = plot.style_linebr)
+lvnLowerPlot10 = plot(showLvnsForDisplay ? lvnLow10 : na, "LVN Rank #10 Lower", color = color.new(color.silver, 0), linewidth = 2, style = plot.style_linebr)
+plot(showLvnsForDisplay ? lvnCenter10 : na, "LVN Rank #10 Center", color = color.new(color.silver, 55), linewidth = 1, style = plot.style_linebr)
 
-plot(showDebug ? frozenSessionHigh : na, "Frozen Session High", color = color.new(color.gray, 20), style = plot.style_linebr)
-plot(showDebug ? frozenSessionLow : na, "Frozen Session Low", color = color.new(color.gray, 20), style = plot.style_linebr)
-plot(showTradeLevels ? activeStopPrice : na, "Active Stop", color = color.new(color.red, 0), linewidth = 1, style = plot.style_linebr)
-plot(showTradeLevels ? activeTargetPrice : na, "Active Target", color = color.new(color.lime, 0), linewidth = 1, style = plot.style_linebr)
+fill(lvnUpperPlot1, lvnLowerPlot1, color = showLvnsForDisplay and shadeLvnZones ? color.new(color.teal, 88) : na, title = "LVN Rank #1 Zone")
+fill(lvnUpperPlot2, lvnLowerPlot2, color = showLvnsForDisplay and shadeLvnZones ? color.new(color.green, 88) : na, title = "LVN Rank #2 Zone")
+fill(lvnUpperPlot3, lvnLowerPlot3, color = showLvnsForDisplay and shadeLvnZones ? color.new(color.blue, 88) : na, title = "LVN Rank #3 Zone")
+fill(lvnUpperPlot4, lvnLowerPlot4, color = showLvnsForDisplay and shadeLvnZones ? color.new(color.orange, 88) : na, title = "LVN Rank #4 Zone")
+fill(lvnUpperPlot5, lvnLowerPlot5, color = showLvnsForDisplay and shadeLvnZones ? color.new(color.red, 88) : na, title = "LVN Rank #5 Zone")
+fill(lvnUpperPlot6, lvnLowerPlot6, color = showLvnsForDisplay and shadeLvnZones ? color.new(color.fuchsia, 88) : na, title = "LVN Rank #6 Zone")
+fill(lvnUpperPlot7, lvnLowerPlot7, color = showLvnsForDisplay and shadeLvnZones ? color.new(color.purple, 88) : na, title = "LVN Rank #7 Zone")
+fill(lvnUpperPlot8, lvnLowerPlot8, color = showLvnsForDisplay and shadeLvnZones ? color.new(color.yellow, 88) : na, title = "LVN Rank #8 Zone")
+fill(lvnUpperPlot9, lvnLowerPlot9, color = showLvnsForDisplay and shadeLvnZones ? color.new(color.navy, 88) : na, title = "LVN Rank #9 Zone")
+fill(lvnUpperPlot10, lvnLowerPlot10, color = showLvnsForDisplay and shadeLvnZones ? color.new(color.silver, 88) : na, title = "LVN Rank #10 Zone")
+plot(showPocForDisplay ? previousPocPrice : na, "Prior Session POC", color = color.new(color.yellow, 0), linewidth = 2, style = plot.style_linebr)
 
-bgcolor(showSessionMarkers and inProfileSession ? color.new(color.aqua, 94) : na, title = "Session Background")
-plotshape(showSessionMarkers and isNewProfileSession, title = "Session Start", style = shape.circle, size = size.tiny, color = color.new(color.aqua, 0), location = location.bottom, text = "18")
-plotshape(showSessionMarkers and isSessionJustEnded, title = "Session End", style = shape.circle, size = size.tiny, color = color.new(color.orange, 0), location = location.top, text = "16")
-plotshape(newLongPosition, title = "Long Entry Marker", style = shape.triangleup, location = location.belowbar, size = size.tiny, color = color.new(color.lime, 0), text = "L")
-plotshape(newShortPosition, title = "Short Entry Marker", style = shape.triangledown, location = location.abovebar, size = size.tiny, color = color.new(color.red, 0), text = "S")
+plot(showProfileBoundsForDisplay ? frozenSessionHigh : na, "Frozen Session High", color = color.new(color.gray, 20), style = plot.style_linebr)
+plot(showProfileBoundsForDisplay ? frozenSessionLow : na, "Frozen Session Low", color = color.new(color.gray, 20), style = plot.style_linebr)
+plot(showTradeLevelsForDisplay ? activeStopPrice : na, "Active Stop", color = color.new(color.red, 0), linewidth = 1, style = plot.style_linebr)
+plot(showTradeLevelsForDisplay ? activeTargetPrice : na, "Active Target", color = color.new(color.lime, 0), linewidth = 1, style = plot.style_linebr)
+
+bgcolor(showSessionMarkersForDisplay and inProfileSession ? color.new(color.aqua, 94) : na, title = "Session Background")
+plotshape(showSessionMarkersForDisplay and isNewProfileSession, title = "Session Start", style = shape.circle, size = size.tiny, color = color.new(color.aqua, 0), location = location.bottom, text = "18")
+plotshape(showSessionMarkersForDisplay and isSessionJustEnded, title = "Session End", style = shape.circle, size = size.tiny, color = color.new(color.orange, 0), location = location.top, text = "16")
+plotshape(showEntryMarkersForDisplay and newLongPosition, title = "Long Entry Marker", style = shape.triangleup, location = location.belowbar, size = size.tiny, color = color.new(color.lime, 0), text = "L")
+plotshape(showEntryMarkersForDisplay and newShortPosition, title = "Short Entry Marker", style = shape.triangledown, location = location.abovebar, size = size.tiny, color = color.new(color.red, 0), text = "S")
 
 if barstate.islast
     f_clear_label_array(lvnLabels)
+    f_update_row_diagnostics_table()
 
-    if showLvnLabels and showLvns and array.size(tradableCenters) > 0
+    if showLvnLabels and showLvnsForDisplay and array.size(tradableCenters) > 0
         int labelsToDraw = math.min(array.size(tradableCenters), MAX_SUPPORTED_RANKS)
         for i = 0 to labelsToDraw - 1
             int rank = i + 1
@@ -1058,27 +1187,35 @@ if barstate.islast
         warningText := "Unsupported profile calculation setting."
     else if str.length(dataWarning) > 0
         warningText := dataWarning
+    else if not na(frozenVolumeConservationErrorPct) and frozenVolumeConservationErrorPct > 0.05
+        warningText := "Profile volume conservation drift exceeded 0.05% on the last frozen session."
 
     if str.length(warningText) > 0
         statusLabel := label.new(bar_index, high, warningText, style = label.style_label_upper_left, color = color.new(color.red, 0), textcolor = color.white, size = size.small)
 
     if showDebug
+        float profileVolumeDelta = not na(frozenProfileVolumeSum) and not na(frozenSourceSessionVolume) ? frozenProfileVolumeSum - frozenSourceSessionVolume : na
+        string conservationStatus = "na"
+        if not na(frozenVolumeConservationErrorPct)
+            conservationStatus := frozenVolumeConservationErrorPct <= 0.05 ? "PASS" : "CHECK"
         string debugText = "Test: " + testLabel
+        debugText += "\nConfig: " + f_configuration_fingerprint()
         debugText += "\nSymbol: " + syminfo.tickerid
         debugText += "\nTimeframe: " + timeframe.period
         debugText += "\nSession: " + profileSession + " " + sessionTimezone
+        debugText += "\nComparison Mode: " + (nativeFrvpComparisonMode ? "On" : "Off")
         debugText += "\nRows: " + str.tostring(profileRows)
         debugText += "\nEnabled Ranks: " + f_enabled_ranks_summary()
         debugText += "\nLongs / Shorts: " + (tradeLongs ? "On" : "Off") + " / " + (tradeShorts ? "On" : "Off")
-        debugText += "\nHistogram: " + (showVolumeProfileHistogram ? "On " + str.tostring(profileVisualWidth) + " bars" : "Off")
+        debugText += "\nHistogram: " + ((showVolumeProfileHistogram or nativeFrvpComparisonMode) ? "On " + str.tostring(profileVisualWidth) + " bars" : "Off")
         debugText += "\nLVN Method: " + lvnMethod
-        debugText += "\nRows: " + str.tostring(profileRows)
         debugText += "\nThreshold: " + str.tostring(lvnThresholdPct, "#.##") + "%"
         debugText += "\nSurrounding Rows: " + str.tostring(surroundingRows)
         debugText += "\nContrast Filter: " + (useContrastFilter ? "On >= " + str.tostring(minContrastRatio, "#.##") + "x" : "Off")
         debugText += "\nFreshness: " + lvnFreshnessMode
         debugText += "\nApproach Distance: " + str.tostring(minimumApproachDistance, "#.##")
         debugText += "\nEntry Cutoff: " + (blockNewEntriesBeforeSessionEnd ? "On " + str.tostring(entryCutoffMinutes) + "m" : "Off")
+        debugText += "\nClose At Session End: " + (closePositionsAtSessionEnd ? "On" : "Off")
         debugText += "\nEntry Session Filter: " + (useEntrySessionFilter ? entrySessionFilter : "Off")
         debugText += "\nPOC Filter: " + ((usePocDistanceFilter or not tradeLvnsAbovePoc or not tradeLvnsBelowPoc) ? "Custom" : "Off")
         debugText += "\nPOC Distance Min: " + str.tostring(minimumPocDistance, "#.##")
@@ -1086,10 +1223,22 @@ if barstate.islast
         debugText += "\nRisk Mode: " + riskMode
         debugText += riskMode == "Fixed Points" ? "\nFixed SL / TP: " + str.tostring(fixedSLPoints, "#.##") + " / " + str.tostring(fixedTPPoints, "#.##") : "\nR / Buffer: " + str.tostring(rrMultiple, "#.##") + " / " + str.tostring(lvnBoundaryBuffer, "#.##")
         debugText += "\nOrder Size: " + str.tostring(orderQty, "#.##")
+        debugText += "\nSource Session Date: " + f_format_date(frozenSessionStartTime)
+        debugText += "\nSource Session Start: " + f_format_timestamp(frozenSessionStartTime)
+        debugText += "\nSource Session End: " + f_format_timestamp(frozenSessionEndTime)
         debugText += "\nFrozen High: " + (not na(frozenSessionHigh) ? str.tostring(frozenSessionHigh, format.mintick) : "na")
         debugText += "\nFrozen Low: " + (not na(frozenSessionLow) ? str.tostring(frozenSessionLow, format.mintick) : "na")
+        debugText += "\nProfile Range: " + (not na(frozenProfileRange) ? str.tostring(frozenProfileRange, "#.####") : "na")
         debugText += "\nRow Height: " + (not na(frozenRowHeight) ? str.tostring(frozenRowHeight, format.mintick) : "na")
-        debugText += "\nPOC Row: " + (not na(previousPocRow) ? str.tostring(previousPocRow) : "na")
+        debugText += "\nMax Row Volume: " + (not na(frozenMaxRowVolume) ? str.tostring(frozenMaxRowVolume, "#.##") : "na")
+        debugText += "\nPOC Row: " + (not na(previousPocRow) ? str.tostring(previousPocRow + 1) : "na")
+        debugText += "\nPOC Price: " + (not na(previousPocPrice) ? str.tostring(previousPocPrice, format.mintick) : "na")
+        debugText += "\nRendered Rows: " + str.tostring(frozenRenderedRowCount)
+        debugText += "\nProfile Vol Sum: " + (not na(frozenProfileVolumeSum) ? str.tostring(frozenProfileVolumeSum, "#.##") : "na")
+        debugText += "\nSource Session Vol: " + (not na(frozenSourceSessionVolume) ? str.tostring(frozenSourceSessionVolume, "#.##") : "na")
+        debugText += "\nVolume Delta: " + (not na(profileVolumeDelta) ? str.tostring(profileVolumeDelta, "#.##") : "na")
+        debugText += "\nConservation Error: " + (not na(frozenVolumeConservationErrorPct) ? str.tostring(frozenVolumeConservationErrorPct, "#.####") + "%" : "na")
+        debugText += "\nConservation Status: " + conservationStatus
         debugText += "\nMinutes To Session End: " + (not na(minutesToSessionEnd) ? str.tostring(minutesToSessionEnd) : "na")
         debugText += "\nDetected LVNs: " + str.tostring(array.size(tradableCenters))
         if array.size(tradableCenters) > 0
