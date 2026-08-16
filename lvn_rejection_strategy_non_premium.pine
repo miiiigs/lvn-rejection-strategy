@@ -1,6 +1,6 @@
 //@version=6
 strategy(
-    "LVN Rejection Strategy",
+    "LVN Rejection Strategy (Non-Premium)",
     overlay = true,
     pyramiding = 0,
     initial_capital = 100000,
@@ -11,14 +11,14 @@ strategy(
     slippage = 0,
     calc_on_order_fills = true,
     process_orders_on_close = false,
-    use_bar_magnifier = true,
+    use_bar_magnifier = false,
     fill_orders_on_standard_ohlc = true,
     backtest_fill_limits_assumption = 0,
     max_lines_count = 100,
     max_labels_count = 100
 )
 
-// Premium-capable variant: Bar Magnifier remains enabled for users who have access to it.
+// Non-Premium-safe variant: Bar Magnifier is disabled by default for wider TradingView compatibility.
 // The strategy freezes each completed session's profile, detects LVN zones from that completed
 // profile, and trades those frozen zones during the following session only.
 // The profile engine is a custom volume-at-price implementation and does not guarantee parity

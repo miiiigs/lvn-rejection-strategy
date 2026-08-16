@@ -1,45 +1,147 @@
 # LVN Rejection Strategy
 
-This repository contains a first functional prototype of the TradingView strategy in `lvn_rejection_strategy.pine`.
+This repository contains two TradingView Pine Script v6 strategy variants:
 
-- Build a custom volume profile for each completed `18:00-16:00` session in `America/New_York`.
-- Freeze that session's LVNs at session end.
-- Trade those frozen levels during the following session only.
-- Use limit orders at the LVN center price so the backtest models "touch the level" more closely than close-of-bar entries.
+- [lvn_rejection_strategy.pine](/C:/dev/lvn-rejection-strategy/lvn_rejection_strategy.pine): premium-capable version with `use_bar_magnifier = true`
+- [lvn_rejection_strategy_non_premium.pine](/C:/dev/lvn-rejection-strategy/lvn_rejection_strategy_non_premium.pine): non-premium-safe version with `use_bar_magnifier = false`
 
-## What this version includes
+Both scripts share the same session logic, LVN methodology, entries, risk model, and visual diagnostics.
 
-- Pine Script v6 `strategy()`
-- Session-aware profile construction with timezone support
-- Chart-bar overlap approximation into configurable profile rows
-- Modular LVN detection with three selectable methods:
-  - `Local Minimum`
-  - `Relative to POC`
-  - `Neighbor Threshold`
-- Deterministic provisional LVN ranking by lowest profile-row volume
-- Rank-based LVN enablement for LVN #1 through LVN #5
-- Fixed-points stops/targets
-- Provisional `LVN Boundary + R` stop/target mode
-- One-position-at-a-time behavior
-- Configurable repeated-touch handling
-- Date-range filtering for order submission
-- Visual LVN, POC, session, and active SL/TP plotting
+## Strategy
 
-## Important implementation notes
+- Profile session: `18:00 -> 16:00 America/New_York`
+- Default rows: `24`
+- Workflow:
+  - Build the custom volume-at-price profile during Session N
+  - Freeze LVN zones when Session N ends
+  - Trade only those frozen LVNs during Session N+1
+- The strategy remains a `strategy()` script and is intended to generate real Strategy Tester trades.
 
-- The strategy isolates the "freeze previous session, trade next session" lifecycle so it can be changed later without rewriting the whole script.
-- Directional approach is determined conservatively from the prior settled close, not from the current bar's full intrabar path. That avoids future-knowledge bias when deciding whether the market approached an LVN from above or below.
-- The `Minimum Approach Distance` input only controls how far away the prior reference price must be before a resting LVN order is considered valid. It does not widen the LVN into a touch zone.
-- Entry orders are assigned to a shared `strategy.oca.cancel` group so one filled LVN order can cancel the remaining pending LVN entries.
-- `use_bar_magnifier = true` and `calc_on_order_fills = true` are enabled by default. TradingView still controls the final fidelity based on account tier, chart timeframe, and available lower-timeframe history.
-- `backtest_fill_limits_assumption = 0` is explicit in the strategy declaration, which means the emulator assumes a limit fills when price reaches that level unless the user changes the strategy's limit-fill setting in TradingView.
-- If the script first loads in the middle of a session, it skips freezing that first partial build rather than using incomplete profile data.
-- Commission and slippage defaults are set in the `strategy()` declaration. TradingView users can still override them from the strategy's `Properties` tab.
+## LVN Definition
 
-## Known limits in this first version
+Primary/default method: `Client Threshold Valley`
 
-- UI toggles are provided for LVN ranks `#1` through `#5`. The detection engine can rank more than five levels, but ranks above five are not individually toggleable yet.
-- The LVN rank labels are a provisional volume-based ranking system, not a client-confirmed semantic ordering such as highest-price LVN, nearest above POC, or nearest below POC.
-- The custom profile engine does not reproduce TradingView's native Fixed Range Volume Profile. It approximates volume-at-price by distributing each chart bar's volume across overlapping rows.
-- The optional full horizontal histogram was intentionally deferred to keep the strategy core lean and resource-safe.
-- Pine fills still depend on TradingView broker-emulator rules. On coarse chart timeframes, touch ordering can remain ambiguous even with bar magnifier enabled.
+LVN = a low-volume price region whose average volume is less than or equal to a configurable percentage of the surrounding price-level average volume, and that region must be bounded by higher-volume structure above and below.
+
+Defaults:
+
+- `LVN Threshold (%) = 40`
+- `30%` = strict
+- `40%` = strong
+- `50%` = moderate
+- `Surrounding Rows Per Side = 2`
+
+Exact surrounding-volume calculation:
+
+- For a candidate row, the script averages the `surroundingRows` rows immediately below and the `surroundingRows` rows immediately above.
+- For a merged multi-row LVN region, it averages the `surroundingRows` rows below the region and the `surroundingRows` rows above the region.
+- The surrounding average used for qualification is `(averageBelow + averageAbove) / 2`.
+
+Qualification rule:
+
+- `candidateRegionAverageVolume <= surroundingAverage * (lvnThresholdPct / 100.0)`
+- `averageBelow > candidateRegionAverageVolume`
+- `averageAbove > candidateRegionAverageVolume`
+
+This boundary check is meant to avoid classifying profile tails as valid LVNs.
+
+## Region Merging And Ranking
+
+- Adjacent qualifying rows are merged into a single LVN zone.
+- Stored zone data includes:
+  - lower boundary
+  - upper boundary
+  - center
+  - average LVN volume
+  - total LVN volume
+  - surrounding average volume
+  - depth ratio
+  - row span
+
+Ranking method:
+
+1. lower depth ratio first
+2. larger surrounding-volume contrast
+3. wider LVN region
+4. lower price as deterministic final tie-breaker
+
+Depth ratio is `candidateRegionAverageVolume / surroundingAverage`.
+
+Lower ratios represent deeper or stronger LVNs.
+
+Legacy diagnostic methods are still available:
+
+- `Local Minimum`
+- `Relative to POC`
+- `Neighbor Threshold`
+
+## Entries
+
+- From above -> long at the LVN upper boundary
+- From below -> short at the LVN lower boundary
+- No candlestick confirmation is required
+- `Minimum Approach Distance` controls how far the prior settled price must be from the zone before a touch is considered eligible
+- Competing entry orders share OCA cancellation so one fill cancels the rest
+
+Per-rank controls remain available for `LVN #1` through `LVN #10`.
+
+Additional directional controls:
+
+- `Trade Longs`
+- `Trade Shorts`
+
+## Risk
+
+Supported risk modes:
+
+- `Fixed Points`
+- `LVN Boundary + R`
+
+Fixed Points:
+
+- Long: `SL = entry - fixedSL`, `TP = entry + fixedTP`
+- Short: `SL = entry + fixedSL`, `TP = entry - fixedTP`
+
+LVN Boundary + R:
+
+- Long stop: below the LVN lower boundary, optionally offset by `LVN Boundary Buffer`
+- Short stop: above the LVN upper boundary, optionally offset by `LVN Boundary Buffer`
+- Target uses the resulting risk distance times `Reward / Risk Multiple`
+- Trades are rejected when risk is less than or equal to `syminfo.mintick`
+
+## Backtesting And Reliability
+
+- Start and end date filters are preserved
+- New orders are not placed outside the active backtest window
+- Pending entry orders are cancelled whenever conditions become invalid
+- Frozen Session N levels are not recalculated using Session N+1 data
+- Current-session developing profile data is not traded
+- Session-start-mid-history cases are skipped defensively to avoid freezing partial profiles
+- Zero-volume or unusable sessions are skipped without fabricating volume
+
+## Visuals And Diagnostics
+
+The scripts can display:
+
+- frozen LVN zone upper and lower boundaries
+- optional center line
+- previous session POC
+- session start and end markers
+- active stop and target
+- LVN labels with depth and surrounding-volume context
+
+`Show Debug Diagnostics` is off by default and exposes profile-validation details such as frozen high and low, row height, POC row, detected LVN count, and top-zone metadata.
+
+## Methodology Disclosure
+
+These scripts use a custom volume-at-price implementation.
+
+TradingView's built-in volume profiles use lower-timeframe data internally. The current implementation uses a chart-bar overlap approximation isolated behind profile-building functions so a lower-timeframe mode can be introduced later without changing the trade engine.
+
+Detected levels may differ from TradingView's native Fixed Range Volume Profile.
+
+Historical fills may also differ between the premium and non-premium variants because Bar Magnifier access and lower-timeframe historical detail are TradingView-plan dependent.
+
+## Current Status
+
+Client-defined LVN algorithm implemented and strategy strengthened, pending TradingView compilation, visual FRVP comparison, and backtest validation.
