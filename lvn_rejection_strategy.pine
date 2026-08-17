@@ -47,6 +47,8 @@ string profileCalculationMode = input.string("Chart Bar Approximation", "Profile
 string lvnMethod = input.string("Client Threshold Valley", "LVN Detection Method", options = ["Client Threshold Valley", "Local Minimum", "Relative to POC", "Neighbor Threshold"], group = GROUP_LVN)
 float lvnThresholdPct = input.float(40.0, "LVN Threshold (%)", minval = 1.0, maxval = 100.0, step = 1.0, group = GROUP_LVN)
 int surroundingRows = input.int(2, "Surrounding Rows Per Side", minval = 1, maxval = 5, group = GROUP_LVN)
+string clientThresholdBoundaryMode = input.string("Immediate Surrounding Average", "Boundary Mode", options = ["Immediate Surrounding Average", "Search For Higher-Volume Nodes"], group = GROUP_LVN)
+int hvnBoundarySearchRows = input.int(5, "HVN Boundary Search Rows", minval = 1, maxval = 10, group = GROUP_LVN)
 bool useContrastFilter = input.bool(false, "Use Minimum LVN Contrast", group = GROUP_LVN)
 float minContrastRatio = input.float(1.25, "Minimum Surrounding Volume Contrast", minval = 1.0, step = 0.05, group = GROUP_LVN)
 int neighborWindow = input.int(1, "Legacy Neighbor Window", minval = 1, maxval = 5, group = GROUP_LVN)
@@ -93,6 +95,8 @@ string testLabel = input.string("Baseline", "Test Label", group = GROUP_BACKTEST
 bool showLvns = input.bool(true, "Show LVNs", group = GROUP_DISPLAY)
 bool showVolumeProfileHistogram = input.bool(true, "Show Volume Profile Histogram", group = GROUP_DISPLAY)
 int profileVisualWidth = input.int(25, "Profile Visual Width", minval = 5, maxval = 80, group = GROUP_DISPLAY)
+string histogramOrientation = input.string("TradingView Style", "Histogram Orientation", options = ["TradingView Style", "Reverse"], group = GROUP_DISPLAY)
+string histogramPlacement = input.string("Before Trading Session", "Histogram Placement", options = ["Before Trading Session", "Over Source Session"], group = GROUP_DISPLAY)
 bool nativeFrvpComparisonMode = input.bool(false, "Native FRVP Comparison Mode", group = GROUP_DISPLAY)
 bool showPoc = input.bool(true, "Show Prior POC", group = GROUP_DISPLAY)
 bool showSessionMarkers = input.bool(true, "Show Session Markers", group = GROUP_DISPLAY)
@@ -149,8 +153,68 @@ var float frozenProfileVolumeSum = na
 var float frozenVolumeConservationErrorPct = na
 var float frozenMaxRowVolume = na
 var int frozenRenderedRowCount = 0
+var int frozenRenderedNonzeroRowCount = 0
 var int frozenSessionStartTime = na
 var int frozenSessionEndTime = na
+var int frozenFirstIncludedBarTime = na
+var int frozenLastIncludedBarTime = na
+var int frozenFirstIncludedBarIndex = na
+var int frozenLastIncludedBarIndex = na
+var int frozenSourceBarCount = 0
+var int frozenHistogramLeftEdge = na
+var int frozenHistogramRightEdge = na
+var float frozenExpectedTopRowHigh = na
+var float frozenExpectedBottomRowLow = na
+var bool frozenProfileBoundaryPass = false
+var bool frozenRowCoveragePass = false
+var bool frozenSourceHighMatchPass = false
+var bool frozenSourceLowMatchPass = false
+var bool frozenHistogramVerticalRangePass = false
+var bool frozenSourceSessionAppearsIncomplete = false
+var int frozenLocalThresholdCandidates = 0
+var int frozenMergedLowVolumeRegions = 0
+var int frozenFinalQualifyingLvns = 0
+var int frozenPreDetectorProfileVolumeSize = 0
+var float frozenPreDetectorProfileVolumeSum = na
+var float frozenPreDetectorProfileVolumeMin = na
+var float frozenPreDetectorProfileVolumeMax = na
+var int frozenPrepareEntryVolumesSize = 0
+var int frozenPrepareEntryRowLowsSize = 0
+var int frozenPrepareEntryRowHighsSize = 0
+var float frozenPrepareEntryVolumesSum = na
+var float frozenPrepareEntryVolumesMin = na
+var float frozenPrepareEntryVolumesMax = na
+var int frozenPrepareAfterClearVolumesSize = 0
+var int frozenPrepareAfterClearRowLowsSize = 0
+var int frozenPrepareAfterClearRowHighsSize = 0
+var float frozenPrepareAfterClearVolumesSum = na
+var float frozenPrepareAfterClearVolumesMin = na
+var float frozenPrepareAfterClearVolumesMax = na
+var int frozenDetectorEntrySourceVolumesSize = 0
+var int frozenDetectorEntrySourceRowLowsSize = 0
+var int frozenDetectorEntrySourceRowHighsSize = 0
+var int frozenDetectorEntryNumericSourceVolumes = 0
+var int frozenDetectorEntryPositiveSourceVolumes = 0
+var float frozenDetectorEntryMinSourceVolume = na
+var float frozenDetectorEntryMaxSourceVolume = na
+var float frozenDetectorEntrySumSourceVolume = na
+var bool frozenDetectorSnapshotMatch = false
+var int frozenEvaluableInteriorRows = 0
+var int frozenRowsWithValidSurroundingAverage = 0
+var float frozenBestRawRowDepthRatio = na
+var float frozenMinimumRawDepthRatioAcrossAllValidInteriorRows = na
+var float frozenBestMergedRegionDepthRatio = na
+var float frozenBestMergedRegionSurroundingAvg = na
+var bool frozenBestLowerHvnFound = false
+var bool frozenBestUpperHvnFound = false
+var int frozenDistanceToLowerHvn = na
+var int frozenDistanceToUpperHvn = na
+var bool frozenBestMergedRegionBoundaryPass = false
+var bool frozenBestMergedRegionContrastPass = false
+var bool frozenBestMergedRegionThresholdPass = false
+var string frozenDetectorProbeFixedText = ""
+var string frozenDetectorProbePocText = ""
+var string frozenBestMergedRegionReason = ""
 var bool tradableProfileReady = false
 var string dataWarning = ""
 var bool anyTradeTakenThisSession = false
@@ -165,6 +229,18 @@ var label debugLabel = na
 var int frozenProfileAnchorBarIndex = na
 var int buildSessionStartTime = na
 var int buildSessionEndTime = na
+var int buildLastIncludedBarTime = na
+var int buildFirstIncludedBarIndex = na
+var int buildLastIncludedBarIndex = na
+var box comparisonSourceSessionBox = na
+var line frvpStartLine = na
+var line frvpEndLine = na
+var label frvpStartLabel = na
+var label frvpEndLabel = na
+var label profileHighLabel = na
+var label profileLowLabel = na
+var label profilePocLabel = na
+var label profileSourceLabel = na
 
 f_long_entry_id(int rank) =>
     "LVN-L-" + str.tostring(rank)
@@ -291,12 +367,36 @@ f_format_date(int ts) =>
         formatted := yearText + "-" + monthText + "-" + dayText
     formatted
 
+f_price_tolerance() =>
+    math.max(syminfo.mintick * 0.5, 0.0000001)
+
+f_values_close(float valueA, float valueB) =>
+    not na(valueA) and not na(valueB) and math.abs(valueA - valueB) <= f_price_tolerance()
+
+f_is_detector_input_error(string message) =>
+    str.length(message) >= 20 and str.substring(message, 0, 20) == "DETECTOR INPUT ERROR"
+
+f_row_coverage_pass(array<float> rowLows, array<float> rowHighs, float expectedLow, float expectedHigh) =>
+    bool pass = array.size(rowLows) > 0 and array.size(rowLows) == array.size(rowHighs) and not na(expectedLow) and not na(expectedHigh)
+    if pass
+        int rowCount = array.size(rowLows)
+        pass := f_values_close(array.get(rowLows, 0), expectedLow) and f_values_close(array.get(rowHighs, rowCount - 1), expectedHigh)
+        for row = 0 to rowCount - 1
+            float rowLow = array.get(rowLows, row)
+            float rowHigh = array.get(rowHighs, row)
+            pass := pass and rowHigh > rowLow
+            if row > 0
+                float priorHigh = array.get(rowHighs, row - 1)
+                pass := pass and math.abs(rowLow - priorHigh) <= f_price_tolerance()
+    pass
+
 f_configuration_fingerprint() =>
     string rankSummary = f_enabled_ranks_summary()
     string directionSummary = tradeLongs and tradeShorts ? "BOTH" : tradeLongs ? "LONG" : tradeShorts ? "SHORT" : "OFF"
     string riskSummary = riskMode == "Fixed Points" ? "FIX" + str.tostring(fixedSLPoints, "#.##") + "x" + str.tostring(fixedTPPoints, "#.##") : "BR" + str.tostring(rrMultiple, "#.##")
     string histogramSummary = showVolumeProfileHistogram or nativeFrvpComparisonMode ? "HIST" : "NOHIST"
-    timeframe.period + " | R" + str.tostring(profileRows) + " | T" + str.tostring(lvnThresholdPct, "#") + " | S" + str.tostring(surroundingRows) + " | LVN" + rankSummary + " | " + directionSummary + " | " + lvnFreshnessMode + " | " + riskSummary + " | " + histogramSummary
+    string boundarySummary = clientThresholdBoundaryMode == "Immediate Surrounding Average" ? "BAVG" : "BHVN" + str.tostring(hvnBoundarySearchRows)
+    timeframe.period + " | R" + str.tostring(profileRows) + " | T" + str.tostring(lvnThresholdPct, "#") + " | S" + str.tostring(surroundingRows) + " | " + boundarySummary + " | LVN" + rankSummary + " | " + directionSummary + " | " + lvnFreshnessMode + " | " + riskSummary + " | " + histogramSummary
 
 f_row_is_lvn(int rowIndex) =>
     bool isLvnRow = false
@@ -318,9 +418,12 @@ f_row_lvn_index(int rowIndex) =>
                 break
     lvnIndex
 
-f_draw_frozen_profile_histogram(int anchorBarIndex) =>
+f_draw_frozen_profile_histogram(int anchorBarIndex, int sourceFirstBarIndex, int sourceLastBarIndex) =>
     f_clear_box_array(profileBoxes)
     int renderedRowCount = 0
+    int renderedNonzeroRowCount = 0
+    int histogramLeftEdge = na
+    int histogramRightEdge = na
 
     if (showVolumeProfileHistogram or nativeFrvpComparisonMode) and array.size(profileVolumes) > 0 and array.size(profileRowLows) == array.size(profileVolumes) and array.size(profileRowHighs) == array.size(profileVolumes) and not na(anchorBarIndex)
         float maxRowVolume = 0.0
@@ -333,25 +436,37 @@ f_draw_frozen_profile_histogram(int anchorBarIndex) =>
                 pocRowIndex := row
 
         if maxRowVolume > 0 and pocRowIndex >= 0
-            int profileRightEdge = anchorBarIndex - 1
+            bool placeOverSourceSession = histogramPlacement == "Over Source Session" and not na(sourceFirstBarIndex) and not na(sourceLastBarIndex)
+            if placeOverSourceSession
+                if histogramOrientation == "TradingView Style"
+                    histogramLeftEdge := sourceFirstBarIndex
+                    histogramRightEdge := histogramLeftEdge + profileVisualWidth
+                else
+                    histogramRightEdge := sourceLastBarIndex
+                    histogramLeftEdge := histogramRightEdge - profileVisualWidth
+            else
+                histogramRightEdge := anchorBarIndex - 1
+                histogramLeftEdge := histogramRightEdge - profileVisualWidth
 
             for row = 0 to array.size(profileVolumes) - 1
                 float rowVolume = array.get(profileVolumes, row)
+                float normalizedWidth = rowVolume / maxRowVolume
+                int widthBars = rowVolume > 0 ? math.max(1, int(math.round(normalizedWidth * profileVisualWidth))) : 1
+                int rowLeftEdge = histogramOrientation == "TradingView Style" ? histogramLeftEdge : histogramRightEdge - widthBars
+                int rowRightEdge = histogramOrientation == "TradingView Style" ? math.min(histogramRightEdge, histogramLeftEdge + widthBars) : histogramRightEdge
+                float rowLow = array.get(profileRowLows, row)
+                float rowHigh = array.get(profileRowHighs, row)
+                bool isPocRow = row == pocRowIndex
+                bool isLvnRow = f_row_is_lvn(row)
+                color fillColor = rowVolume <= 0 ? color.new(color.white, 100) : isPocRow ? color.new(color.orange, 65) : isLvnRow ? color.new(color.red, 78) : color.new(color.blue, 82)
+                color borderColor = rowVolume <= 0 ? color.new(color.gray, 80) : isPocRow ? color.new(color.orange, 0) : isLvnRow ? color.new(color.red, 20) : color.new(color.blue, 55)
+                box rowBox = box.new(rowLeftEdge, rowHigh, rowRightEdge, rowLow, xloc = xloc.bar_index, bgcolor = fillColor, border_color = borderColor, border_width = isPocRow ? 2 : 1)
+                array.push(profileBoxes, rowBox)
+                renderedRowCount += 1
                 if rowVolume > 0
-                    float normalizedWidth = rowVolume / maxRowVolume
-                    int widthBars = math.max(1, int(math.round(normalizedWidth * profileVisualWidth)))
-                    int rowLeftEdge = profileRightEdge - widthBars
-                    float rowLow = array.get(profileRowLows, row)
-                    float rowHigh = array.get(profileRowHighs, row)
-                    bool isPocRow = row == pocRowIndex
-                    bool isLvnRow = f_row_is_lvn(row)
-                    color fillColor = isPocRow ? color.new(color.orange, 65) : isLvnRow ? color.new(color.red, 78) : color.new(color.blue, 82)
-                    color borderColor = isPocRow ? color.new(color.orange, 0) : isLvnRow ? color.new(color.red, 20) : color.new(color.blue, 55)
-                    box rowBox = box.new(rowLeftEdge, rowHigh, profileRightEdge, rowLow, xloc = xloc.bar_index, bgcolor = fillColor, border_color = borderColor, border_width = isPocRow ? 2 : 1)
-                    array.push(profileBoxes, rowBox)
-                    renderedRowCount += 1
+                    renderedNonzeroRowCount += 1
 
-    renderedRowCount
+    [renderedRowCount, renderedNonzeroRowCount, histogramLeftEdge, histogramRightEdge]
 
 f_update_row_diagnostics_table() =>
     table.clear(rowDiagnosticsTable, 0, 0, 7, 204)
@@ -438,6 +553,79 @@ f_sum_volume(array<float> src, int startIndex, int endIndex) =>
             totalValue += array.get(src, i)
     totalValue
 
+f_collect_volume_stats(array<float> src) =>
+    int valueCount = array.size(src)
+    int numericCount = 0
+    int positiveCount = 0
+    float minValue = na
+    float maxValue = na
+    float sumValue = 0.0
+
+    if valueCount > 0
+        for i = 0 to valueCount - 1
+            float value = array.get(src, i)
+            if not na(value)
+                numericCount += 1
+                positiveCount += value > 0 ? 1 : 0
+                minValue := na(minValue) ? value : math.min(minValue, value)
+                maxValue := na(maxValue) ? value : math.max(maxValue, value)
+                sumValue += value
+
+    [valueCount, numericCount, positiveCount, minValue, maxValue, numericCount > 0 ? sumValue : na]
+
+f_build_detector_probe_text(string probeLabel, array<float> sourceVolumes, int probeRow) =>
+    int rowCount = array.size(sourceVolumes)
+    string probeText = probeLabel + ": " + (not na(probeRow) ? str.tostring(probeRow + 1) : "na")
+
+    if not na(probeRow) and probeRow >= 0 and probeRow < rowCount
+        float currentVol = array.get(sourceVolumes, probeRow)
+        float below1Vol = probeRow - 1 >= 0 ? array.get(sourceVolumes, probeRow - 1) : na
+        float below2Vol = probeRow - 2 >= 0 ? array.get(sourceVolumes, probeRow - 2) : na
+        float above1Vol = probeRow + 1 < rowCount ? array.get(sourceVolumes, probeRow + 1) : na
+        float above2Vol = probeRow + 2 < rowCount ? array.get(sourceVolumes, probeRow + 2) : na
+        float helperAvgBelow = f_average_volume(sourceVolumes, probeRow - surroundingRows, probeRow - 1)
+        float helperAvgAbove = f_average_volume(sourceVolumes, probeRow + 1, probeRow + surroundingRows)
+        float surroundingAvg = not na(helperAvgBelow) and not na(helperAvgAbove) ? (helperAvgBelow + helperAvgAbove) * 0.5 : na
+        float manualAvgBelow = not na(below1Vol) and not na(below2Vol) ? (below1Vol + below2Vol) * 0.5 : na
+        float manualAvgAbove = not na(above1Vol) and not na(above2Vol) ? (above1Vol + above2Vol) * 0.5 : na
+        bool helperMatch = not na(helperAvgBelow) and not na(helperAvgAbove) and not na(manualAvgBelow) and not na(manualAvgAbove) and f_values_close(helperAvgBelow, manualAvgBelow) and f_values_close(helperAvgAbove, manualAvgAbove)
+
+        probeText += "\nCurrent: " + (not na(currentVol) ? str.tostring(currentVol, "#.##") : "na")
+        probeText += "\nBelow1: " + (not na(below1Vol) ? str.tostring(below1Vol, "#.##") : "na")
+        probeText += "\nBelow2: " + (not na(below2Vol) ? str.tostring(below2Vol, "#.##") : "na")
+        probeText += "\nAbove1: " + (not na(above1Vol) ? str.tostring(above1Vol, "#.##") : "na")
+        probeText += "\nAbove2: " + (not na(above2Vol) ? str.tostring(above2Vol, "#.##") : "na")
+        probeText += "\nHelper Avg Below: " + (not na(helperAvgBelow) ? str.tostring(helperAvgBelow, "#.##") : "na")
+        probeText += "\nManual Avg Below: " + (not na(manualAvgBelow) ? str.tostring(manualAvgBelow, "#.##") : "na")
+        probeText += "\nHelper Avg Above: " + (not na(helperAvgAbove) ? str.tostring(helperAvgAbove, "#.##") : "na")
+        probeText += "\nManual Avg Above: " + (not na(manualAvgAbove) ? str.tostring(manualAvgAbove, "#.##") : "na")
+        probeText += "\nAvg Below: " + (not na(helperAvgBelow) ? str.tostring(helperAvgBelow, "#.##") : "na")
+        probeText += "\nAvg Above: " + (not na(helperAvgAbove) ? str.tostring(helperAvgAbove, "#.##") : "na")
+        probeText += "\nSurrounding Avg: " + (not na(surroundingAvg) ? str.tostring(surroundingAvg, "#.##") : "na")
+        probeText += "\nAverage Helper Match: " + (helperMatch ? "PASS" : "FAIL")
+    else
+        probeText += "\nProbe unavailable for current bounds."
+
+    probeText
+
+f_array_max(array<float> src) =>
+    float maxValue = na
+    if array.size(src) > 0
+        maxValue := array.get(src, 0)
+        if array.size(src) > 1
+            for i = 1 to array.size(src) - 1
+                maxValue := math.max(maxValue, array.get(src, i))
+    maxValue
+
+f_array_min(array<float> src) =>
+    float minValue = na
+    if array.size(src) > 0
+        minValue := array.get(src, 0)
+        if array.size(src) > 1
+            for i = 1 to array.size(src) - 1
+                minValue := math.min(minValue, array.get(src, i))
+    minValue
+
 f_push_candidate_region(
     array<int> outStartRows,
     array<int> outEndRows,
@@ -497,6 +685,8 @@ f_build_profile_chart_bars(array<float> srcHighs, array<float> srcLows, array<fl
 
     if validProfile
         for row = 0 to rows - 1
+            // Rows are modeled as contiguous half-open bins [low, high), except the final top row,
+            // which is explicitly terminated at the frozen session high to avoid cumulative drift.
             float rowLow = sessionLow + row * rowHeight
             float rowHigh = row == rows - 1 ? sessionHigh : rowLow + rowHeight
             array.push(outRowLows, rowLow)
@@ -541,10 +731,58 @@ f_build_profile(array<float> srcHighs, array<float> srcLows, array<float> srcVol
     // augment the chart-bar approximation without changing strategy execution logic.
     f_build_profile_chart_bars(srcHighs, srcLows, srcVolumes, sessionHigh, sessionLow, rows, outVolumes, outRowLows, outRowHighs)
 
+f_find_higher_volume_below(array<float> sourceVolumes, int startRow, int maxSearchRows, float targetVolume) =>
+    bool found = false
+    int distance = na
+    int searchRow = startRow - 1
+
+    while searchRow >= 0 and startRow - searchRow <= maxSearchRows
+        if array.get(sourceVolumes, searchRow) > targetVolume
+            found := true
+            distance := startRow - searchRow
+            break
+        searchRow -= 1
+
+    [found, distance]
+
+f_find_higher_volume_above(array<float> sourceVolumes, int endRow, int maxSearchRows, float targetVolume) =>
+    bool found = false
+    int distance = na
+    int rowCount = array.size(sourceVolumes)
+    int searchRow = endRow + 1
+
+    while searchRow < rowCount and searchRow - endRow <= maxSearchRows
+        if array.get(sourceVolumes, searchRow) > targetVolume
+            found := true
+            distance := searchRow - endRow
+            break
+        searchRow += 1
+
+    [found, distance]
+
+f_evaluate_client_threshold_boundaries(array<float> sourceVolumes, int startRow, int endRow, float regionAvgVolume, float avgBelow, float avgAbove) =>
+    bool lowerHvnFound = false
+    bool upperHvnFound = false
+    int distanceToLowerHvn = na
+    int distanceToUpperHvn = na
+    bool boundaryPass = false
+
+    if clientThresholdBoundaryMode == "Immediate Surrounding Average"
+        [lowerHvnFound, distanceToLowerHvn] = f_find_higher_volume_below(sourceVolumes, startRow, surroundingRows, regionAvgVolume)
+        [upperHvnFound, distanceToUpperHvn] = f_find_higher_volume_above(sourceVolumes, endRow, surroundingRows, regionAvgVolume)
+        boundaryPass := not na(avgBelow) and not na(avgAbove) and avgBelow > regionAvgVolume and avgAbove > regionAvgVolume
+    else
+        [lowerHvnFound, distanceToLowerHvn] = f_find_higher_volume_below(sourceVolumes, startRow, hvnBoundarySearchRows, regionAvgVolume)
+        [upperHvnFound, distanceToUpperHvn] = f_find_higher_volume_above(sourceVolumes, endRow, hvnBoundarySearchRows, regionAvgVolume)
+        boundaryPass := lowerHvnFound and upperHvnFound
+
+    [boundaryPass, lowerHvnFound, upperHvnFound, distanceToLowerHvn, distanceToUpperHvn]
+
 f_detect_client_threshold_candidates(
     array<float> sourceVolumes,
     array<float> sourceRowLows,
     array<float> sourceRowHighs,
+    int pocIndex,
     array<int> outStartRows,
     array<int> outEndRows,
     array<float> outLows,
@@ -561,8 +799,34 @@ f_detect_client_threshold_candidates(
 ) =>
     int rowCount = array.size(sourceVolumes)
     float threshold = lvnThresholdPct / 100.0
+    [sourceVolumesSize, sourceVolumesNumericCount, sourceVolumesPositiveCount, sourceVolumesMin, sourceVolumesMax, sourceVolumesSum] = f_collect_volume_stats(sourceVolumes)
+    int sourceRowLowsSize = array.size(sourceRowLows)
+    int sourceRowHighsSize = array.size(sourceRowHighs)
+    bool detectorInputInvalid = sourceVolumesSize != profileRows or sourceRowLowsSize != profileRows or sourceRowHighsSize != profileRows
+    int fixedProbeRow = rowCount >= surroundingRows * 2 + 1 ? surroundingRows : na
+    int pocProbeRow = rowCount >= surroundingRows * 2 + 1 and pocIndex >= 0 ? math.max(surroundingRows, math.min(pocIndex, rowCount - surroundingRows - 1)) : na
+    string fixedProbeText = detectorInputInvalid ? "Detector Probe Row: unavailable due to detector input error." : f_build_detector_probe_text("Detector Probe Row", sourceVolumes, fixedProbeRow)
+    string pocProbeText = detectorInputInvalid ? "Detector POC Probe Row: unavailable due to detector input error." : f_build_detector_probe_text("Detector POC Probe Row", sourceVolumes, pocProbeRow)
+    int localThresholdCandidateCount = 0
+    int mergedLowVolumeRegionCount = 0
+    int finalQualifyingCount = 0
+    int evaluableInteriorRows = 0
+    int rowsWithValidSurroundingAverage = 0
+    float bestRawRowDepthRatio = na
+    float minimumRawDepthRatioAcrossAllValidInteriorRows = na
+    float bestMergedRegionDepthRatio = na
+    float bestMergedRegionSurroundingAvg = na
+    bool bestLowerHvnFound = false
+    bool bestUpperHvnFound = false
+    int bestDistanceToLowerHvn = na
+    int bestDistanceToUpperHvn = na
+    bool bestMergedRegionBoundaryPass = false
+    bool bestMergedRegionContrastPass = false
+    bool bestMergedRegionThresholdPass = false
+    string bestMergedRegionReason = detectorInputInvalid ? "DETECTOR INPUT ERROR: expected " + str.tostring(profileRows) + " profile rows, received " + str.tostring(sourceVolumesSize) + "." : rowCount >= surroundingRows * 2 + 1 ? "No local threshold candidates passed the raw depth threshold." : "Not enough rows to evaluate Client Threshold Valley."
 
-    if rowCount >= surroundingRows * 2 + 1
+    if not detectorInputInvalid and rowCount >= surroundingRows * 2 + 1
+        evaluableInteriorRows := rowCount - surroundingRows * 2
         array<bool> seedRows = array.new_bool(rowCount, false)
 
         for row = surroundingRows to rowCount - surroundingRows - 1
@@ -570,9 +834,21 @@ f_detect_client_threshold_candidates(
             float avgBelow = f_average_volume(sourceVolumes, row - surroundingRows, row - 1)
             float avgAbove = f_average_volume(sourceVolumes, row + 1, row + surroundingRows)
             float surroundingAvg = not na(avgBelow) and not na(avgAbove) ? (avgBelow + avgAbove) * 0.5 : na
-            bool bounded = not na(surroundingAvg) and avgBelow > currentVol and avgAbove > currentVol
-            bool qualifies = bounded and currentVol <= surroundingAvg * threshold
-            array.set(seedRows, row, qualifies)
+            float rawDepthRatio = na
+            if not na(surroundingAvg) and surroundingAvg > 0
+                rowsWithValidSurroundingAverage += 1
+                rawDepthRatio := currentVol / surroundingAvg
+                if na(minimumRawDepthRatioAcrossAllValidInteriorRows) or rawDepthRatio < minimumRawDepthRatioAcrossAllValidInteriorRows
+                    minimumRawDepthRatioAcrossAllValidInteriorRows := rawDepthRatio
+            bool thresholdPass = not na(surroundingAvg) and surroundingAvg > 0 and currentVol <= surroundingAvg * threshold
+            if thresholdPass
+                localThresholdCandidateCount += 1
+            array.set(seedRows, row, thresholdPass)
+
+        bestRawRowDepthRatio := minimumRawDepthRatioAcrossAllValidInteriorRows
+
+        if evaluableInteriorRows > 0 and rowsWithValidSurroundingAverage == 0
+            bestMergedRegionReason := "No interior rows had a valid surrounding average."
 
         int row = surroundingRows
         while row <= rowCount - surroundingRows - 1
@@ -582,6 +858,7 @@ f_detect_client_threshold_candidates(
                 while endRow + 1 <= rowCount - surroundingRows - 1 and array.get(seedRows, endRow + 1)
                     endRow += 1
 
+                mergedLowVolumeRegionCount += 1
                 if startRow - surroundingRows >= 0 and endRow + surroundingRows < rowCount
                     float avgBelow = f_average_volume(sourceVolumes, startRow - surroundingRows, startRow - 1)
                     float avgAbove = f_average_volume(sourceVolumes, endRow + 1, endRow + surroundingRows)
@@ -589,11 +866,41 @@ f_detect_client_threshold_candidates(
                     int regionWidth = endRow - startRow + 1
                     float regionAvgVolume = not na(regionTotalVolume) and regionWidth > 0 ? regionTotalVolume / regionWidth : na
                     float surroundingAvg = not na(avgBelow) and not na(avgAbove) ? (avgBelow + avgAbove) * 0.5 : na
-                    bool bounded = not na(regionAvgVolume) and not na(surroundingAvg) and avgBelow > regionAvgVolume and avgAbove > regionAvgVolume
                     float depthRatio = not na(surroundingAvg) and surroundingAvg > 0 ? regionAvgVolume / surroundingAvg : na
                     float contrastRatio = not na(regionAvgVolume) and regionAvgVolume > 0 ? surroundingAvg / regionAvgVolume : na
+                    bool thresholdPass = not na(regionAvgVolume) and not na(surroundingAvg) and regionAvgVolume <= surroundingAvg * threshold
+                    [boundaryPass, lowerHvnFound, upperHvnFound, distanceToLowerHvn, distanceToUpperHvn] = f_evaluate_client_threshold_boundaries(sourceVolumes, startRow, endRow, regionAvgVolume, avgBelow, avgAbove)
                     bool contrastPass = not useContrastFilter or (not na(contrastRatio) and contrastRatio >= minContrastRatio)
-                    bool qualifies = bounded and contrastPass and not na(regionAvgVolume) and not na(surroundingAvg) and regionAvgVolume <= surroundingAvg * threshold
+                    bool qualifies = boundaryPass and contrastPass and thresholdPass
+
+                    bool betterMergedRegion = not na(depthRatio) and (na(bestMergedRegionDepthRatio) or depthRatio < bestMergedRegionDepthRatio)
+                    if betterMergedRegion
+                        bestMergedRegionDepthRatio := depthRatio
+                        bestMergedRegionSurroundingAvg := surroundingAvg
+                        bestLowerHvnFound := lowerHvnFound
+                        bestUpperHvnFound := upperHvnFound
+                        bestDistanceToLowerHvn := distanceToLowerHvn
+                        bestDistanceToUpperHvn := distanceToUpperHvn
+                        bestMergedRegionBoundaryPass := boundaryPass
+                        bestMergedRegionContrastPass := contrastPass
+                        bestMergedRegionThresholdPass := thresholdPass
+                        if not thresholdPass
+                            bestMergedRegionReason := "Best raw row passed threshold, but merged region depth = " + str.tostring(depthRatio, "#.####") + " > " + str.tostring(threshold, "#.####")
+                        else if not boundaryPass
+                            if clientThresholdBoundaryMode == "Immediate Surrounding Average"
+                                bestMergedRegionReason := "Merged region failed immediate surrounding average boundary requirement."
+                            else if not lowerHvnFound and not upperHvnFound
+                                bestMergedRegionReason := "Merged region failed upper/lower boundary requirement. No higher-volume nodes were found on either side."
+                            else if not lowerHvnFound
+                                bestMergedRegionReason := "Merged region failed upper/lower boundary requirement. No lower higher-volume node was found within search range."
+                            else if not upperHvnFound
+                                bestMergedRegionReason := "Merged region failed upper/lower boundary requirement. No upper higher-volume node was found within search range."
+                            else
+                                bestMergedRegionReason := "Merged region failed upper/lower boundary requirement."
+                        else if not contrastPass
+                            bestMergedRegionReason := "Merged region failed contrast filter."
+                        else
+                            bestMergedRegionReason := "Merged region qualified as an LVN."
 
                     if qualifies and regionWidth > 0
                         float regionLow = array.get(sourceRowLows, startRow)
@@ -601,10 +908,13 @@ f_detect_client_threshold_candidates(
                         float regionCenter = (regionLow + regionHigh) * 0.5
                         if not na(depthRatio) and not na(contrastRatio)
                             f_push_candidate_region(outStartRows, outEndRows, outLows, outHighs, outCenters, outAvgVolumes, outTotalVolumes, outSurroundAvgs, outAvgAbove, outAvgBelow, outDepthRatios, outContrastRatios, outWidths, startRow, endRow, regionLow, regionHigh, regionCenter, regionAvgVolume, regionTotalVolume, surroundingAvg, avgAbove, avgBelow, depthRatio, contrastRatio, regionWidth)
+                            finalQualifyingCount += 1
 
                 row := endRow + 1
             else
                 row += 1
+
+    [localThresholdCandidateCount, mergedLowVolumeRegionCount, finalQualifyingCount, sourceVolumesSize, sourceRowLowsSize, sourceRowHighsSize, sourceVolumesNumericCount, sourceVolumesPositiveCount, sourceVolumesMin, sourceVolumesMax, sourceVolumesSum, evaluableInteriorRows, rowsWithValidSurroundingAverage, bestRawRowDepthRatio, minimumRawDepthRatioAcrossAllValidInteriorRows, bestMergedRegionDepthRatio, bestMergedRegionSurroundingAvg, bestLowerHvnFound, bestUpperHvnFound, bestDistanceToLowerHvn, bestDistanceToUpperHvn, bestMergedRegionBoundaryPass, bestMergedRegionContrastPass, bestMergedRegionThresholdPass, fixedProbeText, pocProbeText, bestMergedRegionReason]
 
 f_detect_legacy_candidates(
     array<float> sourceVolumes,
@@ -673,27 +983,22 @@ f_is_region_separated(int candidateStartRow, int candidateEndRow) =>
             separated := separated and rowGapOk
     separated
 
-f_prepare_tradable_lvns(array<float> sourceVolumes, array<float> sourceRowLows, array<float> sourceRowHighs, int pocIndex, float pocVol) =>
+f_rank_and_store_tradable_lvns(
+    array<int> candidateStartRows,
+    array<int> candidateEndRows,
+    array<float> candidateLows,
+    array<float> candidateHighs,
+    array<float> candidateCenters,
+    array<float> candidateAvgVolumes,
+    array<float> candidateTotalVolumes,
+    array<float> candidateSurroundAvgs,
+    array<float> candidateAvgAbove,
+    array<float> candidateAvgBelow,
+    array<float> candidateDepthRatios,
+    array<float> candidateContrastRatios,
+    array<int> candidateWidths
+) =>
     f_clear_tradable_lvns()
-
-    array<int> candidateStartRows = array.new_int()
-    array<int> candidateEndRows = array.new_int()
-    array<float> candidateLows = array.new_float()
-    array<float> candidateHighs = array.new_float()
-    array<float> candidateCenters = array.new_float()
-    array<float> candidateAvgVolumes = array.new_float()
-    array<float> candidateTotalVolumes = array.new_float()
-    array<float> candidateSurroundAvgs = array.new_float()
-    array<float> candidateAvgAbove = array.new_float()
-    array<float> candidateAvgBelow = array.new_float()
-    array<float> candidateDepthRatios = array.new_float()
-    array<float> candidateContrastRatios = array.new_float()
-    array<int> candidateWidths = array.new_int()
-
-    if lvnMethod == "Client Threshold Valley"
-        f_detect_client_threshold_candidates(sourceVolumes, sourceRowLows, sourceRowHighs, candidateStartRows, candidateEndRows, candidateLows, candidateHighs, candidateCenters, candidateAvgVolumes, candidateTotalVolumes, candidateSurroundAvgs, candidateAvgAbove, candidateAvgBelow, candidateDepthRatios, candidateContrastRatios, candidateWidths)
-    else
-        f_detect_legacy_candidates(sourceVolumes, sourceRowLows, sourceRowHighs, pocIndex, pocVol, candidateStartRows, candidateEndRows, candidateLows, candidateHighs, candidateCenters, candidateAvgVolumes, candidateTotalVolumes, candidateSurroundAvgs, candidateAvgAbove, candidateAvgBelow, candidateDepthRatios, candidateContrastRatios, candidateWidths)
 
     int candidateCount = array.size(candidateCenters)
     array<bool> selectedFlags = array.new_bool(candidateCount, false)
@@ -747,6 +1052,67 @@ f_prepare_tradable_lvns(array<float> sourceVolumes, array<float> sourceRowLows, 
                 array.push(tradableRegionWidths, array.get(candidateWidths, bestIndex))
 
     array.size(tradableCenters)
+
+f_prepare_tradable_lvns(array<float> sourceVolumes, array<float> sourceRowLows, array<float> sourceRowHighs, int pocIndex, float pocVol) =>
+    [prepareEntryVolumesSize, prepareEntryNumericCount, prepareEntryPositiveCount, prepareEntryVolumesMin, prepareEntryVolumesMax, prepareEntryVolumesSum] = f_collect_volume_stats(sourceVolumes)
+    int prepareEntryRowLowsSize = array.size(sourceRowLows)
+    int prepareEntryRowHighsSize = array.size(sourceRowHighs)
+
+    f_clear_tradable_lvns()
+
+    [prepareAfterClearVolumesSize, prepareAfterClearNumericCount, prepareAfterClearPositiveCount, prepareAfterClearVolumesMin, prepareAfterClearVolumesMax, prepareAfterClearVolumesSum] = f_collect_volume_stats(sourceVolumes)
+    int prepareAfterClearRowLowsSize = array.size(sourceRowLows)
+    int prepareAfterClearRowHighsSize = array.size(sourceRowHighs)
+
+    array<int> candidateStartRows = array.new_int()
+    array<int> candidateEndRows = array.new_int()
+    array<float> candidateLows = array.new_float()
+    array<float> candidateHighs = array.new_float()
+    array<float> candidateCenters = array.new_float()
+    array<float> candidateAvgVolumes = array.new_float()
+    array<float> candidateTotalVolumes = array.new_float()
+    array<float> candidateSurroundAvgs = array.new_float()
+    array<float> candidateAvgAbove = array.new_float()
+    array<float> candidateAvgBelow = array.new_float()
+    array<float> candidateDepthRatios = array.new_float()
+    array<float> candidateContrastRatios = array.new_float()
+    array<int> candidateWidths = array.new_int()
+    int localThresholdCandidates = 0
+    int mergedLowVolumeRegions = 0
+    int finalQualifyingLvns = 0
+    int sourceVolumesSize = 0
+    int sourceRowLowsSize = 0
+    int sourceRowHighsSize = 0
+    int sourceVolumesNumericCount = 0
+    int sourceVolumesPositiveCount = 0
+    float sourceVolumesMin = na
+    float sourceVolumesMax = na
+    float sourceVolumesSum = na
+    int evaluableInteriorRows = 0
+    int rowsWithValidSurroundingAverage = 0
+    float bestRawRowDepthRatio = na
+    float minimumRawDepthRatioAcrossAllValidInteriorRows = na
+    float bestMergedRegionDepthRatio = na
+    float bestMergedRegionSurroundingAvg = na
+    bool bestLowerHvnFound = false
+    bool bestUpperHvnFound = false
+    int distanceToLowerHvn = na
+    int distanceToUpperHvn = na
+    bool bestMergedRegionBoundaryPass = false
+    bool bestMergedRegionContrastPass = false
+    bool bestMergedRegionThresholdPass = false
+    string fixedProbeText = ""
+    string pocProbeText = ""
+    string bestMergedRegionReason = ""
+
+    if lvnMethod == "Client Threshold Valley"
+        [localThresholdCandidates, mergedLowVolumeRegions, finalQualifyingLvns, sourceVolumesSize, sourceRowLowsSize, sourceRowHighsSize, sourceVolumesNumericCount, sourceVolumesPositiveCount, sourceVolumesMin, sourceVolumesMax, sourceVolumesSum, evaluableInteriorRows, rowsWithValidSurroundingAverage, bestRawRowDepthRatio, minimumRawDepthRatioAcrossAllValidInteriorRows, bestMergedRegionDepthRatio, bestMergedRegionSurroundingAvg, bestLowerHvnFound, bestUpperHvnFound, distanceToLowerHvn, distanceToUpperHvn, bestMergedRegionBoundaryPass, bestMergedRegionContrastPass, bestMergedRegionThresholdPass, fixedProbeText, pocProbeText, bestMergedRegionReason] = f_detect_client_threshold_candidates(sourceVolumes, sourceRowLows, sourceRowHighs, pocIndex, candidateStartRows, candidateEndRows, candidateLows, candidateHighs, candidateCenters, candidateAvgVolumes, candidateTotalVolumes, candidateSurroundAvgs, candidateAvgAbove, candidateAvgBelow, candidateDepthRatios, candidateContrastRatios, candidateWidths)
+    else
+        f_detect_legacy_candidates(sourceVolumes, sourceRowLows, sourceRowHighs, pocIndex, pocVol, candidateStartRows, candidateEndRows, candidateLows, candidateHighs, candidateCenters, candidateAvgVolumes, candidateTotalVolumes, candidateSurroundAvgs, candidateAvgAbove, candidateAvgBelow, candidateDepthRatios, candidateContrastRatios, candidateWidths)
+
+    int preparedCount = f_rank_and_store_tradable_lvns(candidateStartRows, candidateEndRows, candidateLows, candidateHighs, candidateCenters, candidateAvgVolumes, candidateTotalVolumes, candidateSurroundAvgs, candidateAvgAbove, candidateAvgBelow, candidateDepthRatios, candidateContrastRatios, candidateWidths)
+
+    [preparedCount, prepareEntryVolumesSize, prepareEntryRowLowsSize, prepareEntryRowHighsSize, prepareEntryVolumesSum, prepareEntryVolumesMin, prepareEntryVolumesMax, prepareAfterClearVolumesSize, prepareAfterClearRowLowsSize, prepareAfterClearRowHighsSize, prepareAfterClearVolumesSum, prepareAfterClearVolumesMin, prepareAfterClearVolumesMax, localThresholdCandidates, mergedLowVolumeRegions, finalQualifyingLvns, sourceVolumesSize, sourceRowLowsSize, sourceRowHighsSize, sourceVolumesNumericCount, sourceVolumesPositiveCount, sourceVolumesMin, sourceVolumesMax, sourceVolumesSum, evaluableInteriorRows, rowsWithValidSurroundingAverage, bestRawRowDepthRatio, minimumRawDepthRatioAcrossAllValidInteriorRows, bestMergedRegionDepthRatio, bestMergedRegionSurroundingAvg, bestLowerHvnFound, bestUpperHvnFound, distanceToLowerHvn, distanceToUpperHvn, bestMergedRegionBoundaryPass, bestMergedRegionContrastPass, bestMergedRegionThresholdPass, fixedProbeText, pocProbeText, bestMergedRegionReason]
 
 f_get_trade_levels(int direction, float entryPrice, float lvnLow, float lvnHigh) =>
     float stopPrice = na
@@ -804,15 +1170,25 @@ if isNewProfileSession
     buildSessionHasPositiveVolume := false
     buildSessionStartTime := na
     buildSessionEndTime := na
+    buildLastIncludedBarTime := na
+    buildFirstIncludedBarIndex := na
+    buildLastIncludedBarIndex := na
     f_clear_build_profile_buffers()
     f_reset_bool_flags(pendingLongOrders, array.size(tradableCenters))
     f_reset_bool_flags(pendingShortOrders, array.size(tradableCenters))
-    frozenProfileAnchorBarIndex := tradableProfileReady and array.size(profileVolumes) > 0 ? bar_index : na
+    frozenProfileAnchorBarIndex := array.size(profileVolumes) > 0 ? bar_index : na
     if not na(frozenProfileAnchorBarIndex)
-        frozenRenderedRowCount := f_draw_frozen_profile_histogram(frozenProfileAnchorBarIndex)
+        [drawnRowCount, drawnNonzeroRowCount, histogramLeftEdge, histogramRightEdge] = f_draw_frozen_profile_histogram(frozenProfileAnchorBarIndex, frozenFirstIncludedBarIndex, frozenLastIncludedBarIndex)
+        frozenRenderedRowCount := drawnRowCount
+        frozenRenderedNonzeroRowCount := drawnNonzeroRowCount
+        frozenHistogramLeftEdge := histogramLeftEdge
+        frozenHistogramRightEdge := histogramRightEdge
     else
         f_clear_box_array(profileBoxes)
         frozenRenderedRowCount := 0
+        frozenRenderedNonzeroRowCount := 0
+        frozenHistogramLeftEdge := na
+        frozenHistogramRightEdge := na
 else if inProfileSession and not buildSessionActive
     f_cancel_all_entry_orders()
     anyTradeTakenThisSession := false
@@ -825,19 +1201,31 @@ else if inProfileSession and not buildSessionActive
     buildSessionHasPositiveVolume := false
     buildSessionStartTime := na
     buildSessionEndTime := na
+    buildLastIncludedBarTime := na
+    buildFirstIncludedBarIndex := na
+    buildLastIncludedBarIndex := na
     f_clear_build_profile_buffers()
     f_reset_bool_flags(pendingLongOrders, array.size(tradableCenters))
     f_reset_bool_flags(pendingShortOrders, array.size(tradableCenters))
     frozenProfileAnchorBarIndex := na
     f_clear_box_array(profileBoxes)
+    frozenRenderedRowCount := 0
+    frozenRenderedNonzeroRowCount := 0
+    frozenHistogramLeftEdge := na
+    frozenHistogramRightEdge := na
     dataWarning := "Initial history started mid-session. The first detected profile is skipped to avoid freezing a partial session."
 
 if inProfileSession and buildSessionActive
     float safeVolume = na(volume) ? 0.0 : volume
+    // Bars are collected by session membership at their open time. On M1 this includes the 18:00
+    // bar and the 15:59 bar, while excluding the 16:00 bar that opens after the session closes.
     array.push(sessionBarHighs, high)
     array.push(sessionBarLows, low)
     array.push(sessionBarVolumes, safeVolume)
     buildSessionStartTime := na(buildSessionStartTime) ? time : buildSessionStartTime
+    buildLastIncludedBarTime := time
+    buildFirstIncludedBarIndex := na(buildFirstIncludedBarIndex) ? bar_index : buildFirstIncludedBarIndex
+    buildLastIncludedBarIndex := bar_index
     buildSessionEndTime := time_close
     buildSessionHigh := na(buildSessionHigh) ? high : math.max(buildSessionHigh, high)
     buildSessionLow := na(buildSessionLow) ? low : math.min(buildSessionLow, low)
@@ -854,6 +1242,8 @@ if isSessionJustEnded
         [validProfile, rowHeight, totalVolume, pocIndex, pocVol] = f_build_profile(sessionBarHighs, sessionBarLows, sessionBarVolumes, buildSessionHigh, buildSessionLow, profileRows, profileVolumes, profileRowLows, profileRowHighs)
 
         if validProfile and totalVolume > 0 and pocIndex >= 0
+            float sourceSessionHigh = f_array_max(sessionBarHighs)
+            float sourceSessionLow = f_array_min(sessionBarLows)
             frozenSessionHigh := buildSessionHigh
             frozenSessionLow := buildSessionLow
             frozenRowHeight := rowHeight
@@ -864,17 +1254,151 @@ if isSessionJustEnded
             frozenSourceSessionVolume := totalVolume
             frozenSessionStartTime := buildSessionStartTime
             frozenSessionEndTime := buildSessionEndTime
+            frozenFirstIncludedBarTime := buildSessionStartTime
+            frozenLastIncludedBarTime := buildLastIncludedBarTime
+            frozenFirstIncludedBarIndex := buildFirstIncludedBarIndex
+            frozenLastIncludedBarIndex := buildLastIncludedBarIndex
+            frozenSourceBarCount := array.size(sessionBarHighs)
             frozenMaxRowVolume := pocVol
             frozenProfileVolumeSum := array.size(profileVolumes) > 0 ? f_sum_volume(profileVolumes, 0, array.size(profileVolumes) - 1) : na
             frozenVolumeConservationErrorPct := not na(frozenSourceSessionVolume) and frozenSourceSessionVolume > 0 and not na(frozenProfileVolumeSum) ? math.abs(frozenProfileVolumeSum - frozenSourceSessionVolume) / frozenSourceSessionVolume * 100.0 : na
+            frozenExpectedBottomRowLow := array.size(profileRowLows) > 0 ? array.get(profileRowLows, 0) : na
+            frozenExpectedTopRowHigh := array.size(profileRowHighs) > 0 ? array.get(profileRowHighs, array.size(profileRowHighs) - 1) : na
+            frozenProfileBoundaryPass := f_values_close(frozenExpectedBottomRowLow, frozenSessionLow) and f_values_close(frozenExpectedTopRowHigh, frozenSessionHigh)
+            frozenRowCoveragePass := f_row_coverage_pass(profileRowLows, profileRowHighs, frozenSessionLow, frozenSessionHigh)
+            frozenSourceHighMatchPass := f_values_close(sourceSessionHigh, frozenSessionHigh)
+            frozenSourceLowMatchPass := f_values_close(sourceSessionLow, frozenSessionLow)
+            frozenHistogramVerticalRangePass := frozenProfileBoundaryPass
+            frozenSourceSessionAppearsIncomplete := timeframe.period == "1" and frozenSourceBarCount < 1188
+            array<float> diagnosticProfileVolumeSnapshot = array.copy(profileVolumes)
+            array<float> detectorVolumes = array.copy(profileVolumes)
+            array<float> detectorRowLows = array.copy(profileRowLows)
+            array<float> detectorRowHighs = array.copy(profileRowHighs)
+            [snapshotSize, snapshotNumericCount, snapshotPositiveCount, snapshotMin, snapshotMax, snapshotSum] = f_collect_volume_stats(diagnosticProfileVolumeSnapshot)
+            frozenPreDetectorProfileVolumeSize := snapshotSize
+            frozenPreDetectorProfileVolumeSum := snapshotSum
+            frozenPreDetectorProfileVolumeMin := snapshotMin
+            frozenPreDetectorProfileVolumeMax := snapshotMax
+            int preparedCount = 0
+            int prepareEntryVolumesSize = 0
+            int prepareEntryRowLowsSize = 0
+            int prepareEntryRowHighsSize = 0
+            int prepareEntryNumericCount = 0
+            int prepareEntryPositiveCount = 0
+            float prepareEntryVolumesSum = na
+            float prepareEntryVolumesMin = na
+            float prepareEntryVolumesMax = na
+            int prepareAfterClearVolumesSize = 0
+            int prepareAfterClearRowLowsSize = 0
+            int prepareAfterClearRowHighsSize = 0
+            int prepareAfterClearNumericCount = 0
+            int prepareAfterClearPositiveCount = 0
+            float prepareAfterClearVolumesSum = na
+            float prepareAfterClearVolumesMin = na
+            float prepareAfterClearVolumesMax = na
+            int localThresholdCandidates = 0
+            int mergedLowVolumeRegions = 0
+            int finalQualifyingLvns = 0
+            int sourceVolumesSize = 0
+            int sourceRowLowsSize = 0
+            int sourceRowHighsSize = 0
+            int sourceVolumesNumericCount = 0
+            int sourceVolumesPositiveCount = 0
+            float sourceVolumesMin = na
+            float sourceVolumesMax = na
+            float sourceVolumesSum = na
+            int evaluableInteriorRows = 0
+            int rowsWithValidSurroundingAverage = 0
+            float bestRawRowDepthRatio = na
+            float minimumRawDepthRatioAcrossAllValidInteriorRows = na
+            float bestMergedRegionDepthRatio = na
+            float bestMergedRegionSurroundingAvg = na
+            bool bestLowerHvnFound = false
+            bool bestUpperHvnFound = false
+            int distanceToLowerHvn = na
+            int distanceToUpperHvn = na
+            bool bestMergedRegionBoundaryPass = false
+            bool bestMergedRegionContrastPass = false
+            bool bestMergedRegionThresholdPass = false
+            string fixedProbeText = ""
+            string pocProbeText = ""
+            string bestMergedRegionReason = ""
 
-            int preparedCount = f_prepare_tradable_lvns(profileVolumes, profileRowLows, profileRowHighs, pocIndex, pocVol)
+            if lvnMethod == "Client Threshold Valley"
+                [prepareEntryVolumesSize, prepareEntryNumericCount, prepareEntryPositiveCount, prepareEntryVolumesMin, prepareEntryVolumesMax, prepareEntryVolumesSum] = f_collect_volume_stats(detectorVolumes)
+                prepareEntryRowLowsSize := array.size(detectorRowLows)
+                prepareEntryRowHighsSize := array.size(detectorRowHighs)
+
+                f_clear_tradable_lvns()
+
+                [prepareAfterClearVolumesSize, prepareAfterClearNumericCount, prepareAfterClearPositiveCount, prepareAfterClearVolumesMin, prepareAfterClearVolumesMax, prepareAfterClearVolumesSum] = f_collect_volume_stats(detectorVolumes)
+                prepareAfterClearRowLowsSize := array.size(detectorRowLows)
+                prepareAfterClearRowHighsSize := array.size(detectorRowHighs)
+
+                array<int> candidateStartRows = array.new_int()
+                array<int> candidateEndRows = array.new_int()
+                array<float> candidateLows = array.new_float()
+                array<float> candidateHighs = array.new_float()
+                array<float> candidateCenters = array.new_float()
+                array<float> candidateAvgVolumes = array.new_float()
+                array<float> candidateTotalVolumes = array.new_float()
+                array<float> candidateSurroundAvgs = array.new_float()
+                array<float> candidateAvgAbove = array.new_float()
+                array<float> candidateAvgBelow = array.new_float()
+                array<float> candidateDepthRatios = array.new_float()
+                array<float> candidateContrastRatios = array.new_float()
+                array<int> candidateWidths = array.new_int()
+
+                [localThresholdCandidates, mergedLowVolumeRegions, finalQualifyingLvns, sourceVolumesSize, sourceRowLowsSize, sourceRowHighsSize, sourceVolumesNumericCount, sourceVolumesPositiveCount, sourceVolumesMin, sourceVolumesMax, sourceVolumesSum, evaluableInteriorRows, rowsWithValidSurroundingAverage, bestRawRowDepthRatio, minimumRawDepthRatioAcrossAllValidInteriorRows, bestMergedRegionDepthRatio, bestMergedRegionSurroundingAvg, bestLowerHvnFound, bestUpperHvnFound, distanceToLowerHvn, distanceToUpperHvn, bestMergedRegionBoundaryPass, bestMergedRegionContrastPass, bestMergedRegionThresholdPass, fixedProbeText, pocProbeText, bestMergedRegionReason] = f_detect_client_threshold_candidates(detectorVolumes, detectorRowLows, detectorRowHighs, pocIndex, candidateStartRows, candidateEndRows, candidateLows, candidateHighs, candidateCenters, candidateAvgVolumes, candidateTotalVolumes, candidateSurroundAvgs, candidateAvgAbove, candidateAvgBelow, candidateDepthRatios, candidateContrastRatios, candidateWidths)
+                preparedCount := f_rank_and_store_tradable_lvns(candidateStartRows, candidateEndRows, candidateLows, candidateHighs, candidateCenters, candidateAvgVolumes, candidateTotalVolumes, candidateSurroundAvgs, candidateAvgAbove, candidateAvgBelow, candidateDepthRatios, candidateContrastRatios, candidateWidths)
+            else
+                [preparedCount, prepareEntryVolumesSize, prepareEntryRowLowsSize, prepareEntryRowHighsSize, prepareEntryVolumesSum, prepareEntryVolumesMin, prepareEntryVolumesMax, prepareAfterClearVolumesSize, prepareAfterClearRowLowsSize, prepareAfterClearRowHighsSize, prepareAfterClearVolumesSum, prepareAfterClearVolumesMin, prepareAfterClearVolumesMax, localThresholdCandidates, mergedLowVolumeRegions, finalQualifyingLvns, sourceVolumesSize, sourceRowLowsSize, sourceRowHighsSize, sourceVolumesNumericCount, sourceVolumesPositiveCount, sourceVolumesMin, sourceVolumesMax, sourceVolumesSum, evaluableInteriorRows, rowsWithValidSurroundingAverage, bestRawRowDepthRatio, minimumRawDepthRatioAcrossAllValidInteriorRows, bestMergedRegionDepthRatio, bestMergedRegionSurroundingAvg, bestLowerHvnFound, bestUpperHvnFound, distanceToLowerHvn, distanceToUpperHvn, bestMergedRegionBoundaryPass, bestMergedRegionContrastPass, bestMergedRegionThresholdPass, fixedProbeText, pocProbeText, bestMergedRegionReason] = f_prepare_tradable_lvns(detectorVolumes, detectorRowLows, detectorRowHighs, pocIndex, pocVol)
+            frozenPrepareEntryVolumesSize := prepareEntryVolumesSize
+            frozenPrepareEntryRowLowsSize := prepareEntryRowLowsSize
+            frozenPrepareEntryRowHighsSize := prepareEntryRowHighsSize
+            frozenPrepareEntryVolumesSum := prepareEntryVolumesSum
+            frozenPrepareEntryVolumesMin := prepareEntryVolumesMin
+            frozenPrepareEntryVolumesMax := prepareEntryVolumesMax
+            frozenPrepareAfterClearVolumesSize := prepareAfterClearVolumesSize
+            frozenPrepareAfterClearRowLowsSize := prepareAfterClearRowLowsSize
+            frozenPrepareAfterClearRowHighsSize := prepareAfterClearRowHighsSize
+            frozenPrepareAfterClearVolumesSum := prepareAfterClearVolumesSum
+            frozenPrepareAfterClearVolumesMin := prepareAfterClearVolumesMin
+            frozenPrepareAfterClearVolumesMax := prepareAfterClearVolumesMax
+            frozenLocalThresholdCandidates := localThresholdCandidates
+            frozenMergedLowVolumeRegions := mergedLowVolumeRegions
+            frozenFinalQualifyingLvns := finalQualifyingLvns
+            frozenDetectorEntrySourceVolumesSize := sourceVolumesSize
+            frozenDetectorEntrySourceRowLowsSize := sourceRowLowsSize
+            frozenDetectorEntrySourceRowHighsSize := sourceRowHighsSize
+            frozenDetectorEntryNumericSourceVolumes := sourceVolumesNumericCount
+            frozenDetectorEntryPositiveSourceVolumes := sourceVolumesPositiveCount
+            frozenDetectorEntryMinSourceVolume := sourceVolumesMin
+            frozenDetectorEntryMaxSourceVolume := sourceVolumesMax
+            frozenDetectorEntrySumSourceVolume := sourceVolumesSum
+            frozenDetectorSnapshotMatch := snapshotSize == sourceVolumesSize and f_values_close(snapshotMin, sourceVolumesMin) and f_values_close(snapshotMax, sourceVolumesMax) and f_values_close(snapshotSum, sourceVolumesSum)
+            frozenEvaluableInteriorRows := evaluableInteriorRows
+            frozenRowsWithValidSurroundingAverage := rowsWithValidSurroundingAverage
+            frozenBestRawRowDepthRatio := bestRawRowDepthRatio
+            frozenMinimumRawDepthRatioAcrossAllValidInteriorRows := minimumRawDepthRatioAcrossAllValidInteriorRows
+            frozenBestMergedRegionDepthRatio := bestMergedRegionDepthRatio
+            frozenBestMergedRegionSurroundingAvg := bestMergedRegionSurroundingAvg
+            frozenBestLowerHvnFound := bestLowerHvnFound
+            frozenBestUpperHvnFound := bestUpperHvnFound
+            frozenDistanceToLowerHvn := distanceToLowerHvn
+            frozenDistanceToUpperHvn := distanceToUpperHvn
+            frozenBestMergedRegionBoundaryPass := bestMergedRegionBoundaryPass
+            frozenBestMergedRegionContrastPass := bestMergedRegionContrastPass
+            frozenBestMergedRegionThresholdPass := bestMergedRegionThresholdPass
+            frozenDetectorProbeFixedText := fixedProbeText
+            frozenDetectorProbePocText := pocProbeText
+            frozenBestMergedRegionReason := bestMergedRegionReason
             tradableProfileReady := preparedCount > 0
             f_reset_usage_flags(lvnUsedThisSession, preparedCount)
             f_reset_bool_flags(pendingLongOrders, preparedCount)
             f_reset_bool_flags(pendingShortOrders, preparedCount)
             frozenProfileAnchorBarIndex := na
-            dataWarning := preparedCount > 0 ? "" : "Profile completed, but no LVNs passed the current detection settings."
+            dataWarning := preparedCount > 0 ? "" : f_is_detector_input_error(bestMergedRegionReason) ? bestMergedRegionReason : "Profile completed, but no LVNs passed the current detection settings."
         else
             f_clear_frozen_profile_buffers()
             f_reset_usage_flags(lvnUsedThisSession, 0)
@@ -893,8 +1417,68 @@ if isSessionJustEnded
             frozenVolumeConservationErrorPct := na
             frozenMaxRowVolume := na
             frozenRenderedRowCount := 0
+            frozenRenderedNonzeroRowCount := 0
             frozenSessionStartTime := na
             frozenSessionEndTime := na
+            frozenFirstIncludedBarTime := na
+            frozenLastIncludedBarTime := na
+            frozenFirstIncludedBarIndex := na
+            frozenLastIncludedBarIndex := na
+            frozenSourceBarCount := 0
+            frozenHistogramLeftEdge := na
+            frozenHistogramRightEdge := na
+            frozenExpectedBottomRowLow := na
+            frozenExpectedTopRowHigh := na
+            frozenProfileBoundaryPass := false
+            frozenRowCoveragePass := false
+            frozenSourceHighMatchPass := false
+            frozenSourceLowMatchPass := false
+            frozenHistogramVerticalRangePass := false
+            frozenSourceSessionAppearsIncomplete := false
+            frozenLocalThresholdCandidates := 0
+            frozenMergedLowVolumeRegions := 0
+            frozenFinalQualifyingLvns := 0
+            frozenPreDetectorProfileVolumeSize := 0
+            frozenPreDetectorProfileVolumeSum := na
+            frozenPreDetectorProfileVolumeMin := na
+            frozenPreDetectorProfileVolumeMax := na
+            frozenPrepareEntryVolumesSize := 0
+            frozenPrepareEntryRowLowsSize := 0
+            frozenPrepareEntryRowHighsSize := 0
+            frozenPrepareEntryVolumesSum := na
+            frozenPrepareEntryVolumesMin := na
+            frozenPrepareEntryVolumesMax := na
+            frozenPrepareAfterClearVolumesSize := 0
+            frozenPrepareAfterClearRowLowsSize := 0
+            frozenPrepareAfterClearRowHighsSize := 0
+            frozenPrepareAfterClearVolumesSum := na
+            frozenPrepareAfterClearVolumesMin := na
+            frozenPrepareAfterClearVolumesMax := na
+            frozenDetectorEntrySourceVolumesSize := 0
+            frozenDetectorEntrySourceRowLowsSize := 0
+            frozenDetectorEntrySourceRowHighsSize := 0
+            frozenDetectorEntryNumericSourceVolumes := 0
+            frozenDetectorEntryPositiveSourceVolumes := 0
+            frozenDetectorEntryMinSourceVolume := na
+            frozenDetectorEntryMaxSourceVolume := na
+            frozenDetectorEntrySumSourceVolume := na
+            frozenDetectorSnapshotMatch := false
+            frozenEvaluableInteriorRows := 0
+            frozenRowsWithValidSurroundingAverage := 0
+            frozenBestRawRowDepthRatio := na
+            frozenMinimumRawDepthRatioAcrossAllValidInteriorRows := na
+            frozenBestMergedRegionDepthRatio := na
+            frozenBestMergedRegionSurroundingAvg := na
+            frozenBestLowerHvnFound := false
+            frozenBestUpperHvnFound := false
+            frozenDistanceToLowerHvn := na
+            frozenDistanceToUpperHvn := na
+            frozenBestMergedRegionBoundaryPass := false
+            frozenBestMergedRegionContrastPass := false
+            frozenBestMergedRegionThresholdPass := false
+            frozenDetectorProbeFixedText := ""
+            frozenDetectorProbePocText := ""
+            frozenBestMergedRegionReason := ""
             frozenProfileAnchorBarIndex := na
             dataWarning := "Skipped profile because the session range or allocated volume was invalid."
     else
@@ -915,8 +1499,68 @@ if isSessionJustEnded
         frozenVolumeConservationErrorPct := na
         frozenMaxRowVolume := na
         frozenRenderedRowCount := 0
+        frozenRenderedNonzeroRowCount := 0
         frozenSessionStartTime := na
         frozenSessionEndTime := na
+        frozenFirstIncludedBarTime := na
+        frozenLastIncludedBarTime := na
+        frozenFirstIncludedBarIndex := na
+        frozenLastIncludedBarIndex := na
+        frozenSourceBarCount := 0
+        frozenHistogramLeftEdge := na
+        frozenHistogramRightEdge := na
+        frozenExpectedBottomRowLow := na
+        frozenExpectedTopRowHigh := na
+        frozenProfileBoundaryPass := false
+        frozenRowCoveragePass := false
+        frozenSourceHighMatchPass := false
+        frozenSourceLowMatchPass := false
+        frozenHistogramVerticalRangePass := false
+        frozenSourceSessionAppearsIncomplete := false
+        frozenLocalThresholdCandidates := 0
+        frozenMergedLowVolumeRegions := 0
+        frozenFinalQualifyingLvns := 0
+        frozenPreDetectorProfileVolumeSize := 0
+        frozenPreDetectorProfileVolumeSum := na
+        frozenPreDetectorProfileVolumeMin := na
+        frozenPreDetectorProfileVolumeMax := na
+        frozenPrepareEntryVolumesSize := 0
+        frozenPrepareEntryRowLowsSize := 0
+        frozenPrepareEntryRowHighsSize := 0
+        frozenPrepareEntryVolumesSum := na
+        frozenPrepareEntryVolumesMin := na
+        frozenPrepareEntryVolumesMax := na
+        frozenPrepareAfterClearVolumesSize := 0
+        frozenPrepareAfterClearRowLowsSize := 0
+        frozenPrepareAfterClearRowHighsSize := 0
+        frozenPrepareAfterClearVolumesSum := na
+        frozenPrepareAfterClearVolumesMin := na
+        frozenPrepareAfterClearVolumesMax := na
+        frozenDetectorEntrySourceVolumesSize := 0
+        frozenDetectorEntrySourceRowLowsSize := 0
+        frozenDetectorEntrySourceRowHighsSize := 0
+        frozenDetectorEntryNumericSourceVolumes := 0
+        frozenDetectorEntryPositiveSourceVolumes := 0
+        frozenDetectorEntryMinSourceVolume := na
+        frozenDetectorEntryMaxSourceVolume := na
+        frozenDetectorEntrySumSourceVolume := na
+        frozenDetectorSnapshotMatch := false
+        frozenEvaluableInteriorRows := 0
+        frozenRowsWithValidSurroundingAverage := 0
+        frozenBestRawRowDepthRatio := na
+        frozenMinimumRawDepthRatioAcrossAllValidInteriorRows := na
+        frozenBestMergedRegionDepthRatio := na
+        frozenBestMergedRegionSurroundingAvg := na
+        frozenBestLowerHvnFound := false
+        frozenBestUpperHvnFound := false
+        frozenDistanceToLowerHvn := na
+        frozenDistanceToUpperHvn := na
+        frozenBestMergedRegionBoundaryPass := false
+        frozenBestMergedRegionContrastPass := false
+        frozenBestMergedRegionThresholdPass := false
+        frozenDetectorProbeFixedText := ""
+        frozenDetectorProbePocText := ""
+        frozenBestMergedRegionReason := ""
         frozenProfileAnchorBarIndex := na
         dataWarning := skipCurrentBuild ? "Skipped an incomplete profile because the chart history started inside the session." : "Skipped profile because no usable volume was available."
 
@@ -1150,6 +1794,34 @@ if barstate.islast
     f_clear_label_array(lvnLabels)
     f_update_row_diagnostics_table()
 
+    if not na(comparisonSourceSessionBox)
+        box.delete(comparisonSourceSessionBox)
+        comparisonSourceSessionBox := na
+    if not na(frvpStartLine)
+        line.delete(frvpStartLine)
+        frvpStartLine := na
+    if not na(frvpEndLine)
+        line.delete(frvpEndLine)
+        frvpEndLine := na
+    if not na(frvpStartLabel)
+        label.delete(frvpStartLabel)
+        frvpStartLabel := na
+    if not na(frvpEndLabel)
+        label.delete(frvpEndLabel)
+        frvpEndLabel := na
+    if not na(profileHighLabel)
+        label.delete(profileHighLabel)
+        profileHighLabel := na
+    if not na(profileLowLabel)
+        label.delete(profileLowLabel)
+        profileLowLabel := na
+    if not na(profilePocLabel)
+        label.delete(profilePocLabel)
+        profilePocLabel := na
+    if not na(profileSourceLabel)
+        label.delete(profileSourceLabel)
+        profileSourceLabel := na
+
     if showLvnLabels and showLvnsForDisplay and array.size(tradableCenters) > 0
         int labelsToDraw = math.min(array.size(tradableCenters), MAX_SUPPORTED_RANKS)
         for i = 0 to labelsToDraw - 1
@@ -1184,36 +1856,71 @@ if barstate.islast
         debugLabel := na
 
     string warningText = ""
+    bool m1ValidationTimeframe = timeframe.period == "1"
     if not timeframeOk
         warningText := "Use this strategy on intraday charts. Higher timeframes cannot rebuild a session profile reliably."
     else if profileCalculationMode != "Chart Bar Approximation"
         warningText := "Unsupported profile calculation setting."
     else if str.length(dataWarning) > 0
         warningText := dataWarning
+    else if nativeFrvpComparisonMode and not m1ValidationTimeframe
+        warningText := "FRVP COMPARISON INVALID: Client baseline uses M1. Current chart timeframe = " + timeframe.period
+    else if array.size(profileVolumes) > 0 and not frozenProfileBoundaryPass
+        warningText := "Profile boundary validation failed on the last frozen session."
+    else if array.size(profileVolumes) > 0 and not frozenRowCoveragePass
+        warningText := "Row coverage validation failed on the last frozen session."
+    else if array.size(profileVolumes) > 0 and not frozenSourceHighMatchPass
+        warningText := "Frozen session high does not match source-session highs."
+    else if array.size(profileVolumes) > 0 and not frozenSourceLowMatchPass
+        warningText := "Frozen session low does not match source-session lows."
+    else if array.size(profileVolumes) > 0 and not frozenHistogramVerticalRangePass
+        warningText := "Histogram vertical range does not match frozen profile bounds."
     else if not na(frozenVolumeConservationErrorPct) and frozenVolumeConservationErrorPct > 0.05
         warningText := "Profile volume conservation drift exceeded 0.05% on the last frozen session."
+    else if frozenSourceSessionAppearsIncomplete
+        warningText := "Warning: source session appears incomplete (<90% of expected M1 bars)."
 
-    if str.length(warningText) > 0
-        statusLabel := label.new(bar_index, high, warningText, style = label.style_label_upper_left, color = color.new(color.red, 0), textcolor = color.white, size = size.small)
+    string comparisonText = ""
+    if nativeFrvpComparisonMode and not na(frozenSessionStartTime) and not na(frozenLastIncludedBarTime)
+        comparisonText := "Native FRVP anchors:\nStart: " + f_format_timestamp(frozenSessionStartTime) + " | Bar " + str.tostring(frozenFirstIncludedBarIndex) + "\nEnd: " + f_format_timestamp(frozenLastIncludedBarTime) + " | Bar " + str.tostring(frozenLastIncludedBarIndex) + "\nRows: " + str.tostring(profileRows) + " | Chart: 1 minute\nNative FRVP must cover the highlighted source-session box exactly."
+
+    string statusText = warningText
+    if str.length(comparisonText) > 0
+        statusText := str.length(statusText) > 0 ? statusText + "\n\n" + comparisonText : comparisonText
+
+    if str.length(statusText) > 0
+        statusLabel := label.new(bar_index, high, statusText, style = label.style_label_upper_left, color = color.new(color.red, 0), textcolor = color.white, size = size.small)
 
     if showDebug
         float profileVolumeDelta = not na(frozenProfileVolumeSum) and not na(frozenSourceSessionVolume) ? frozenProfileVolumeSum - frozenSourceSessionVolume : na
         string conservationStatus = "na"
         if not na(frozenVolumeConservationErrorPct)
             conservationStatus := frozenVolumeConservationErrorPct <= 0.05 ? "PASS" : "CHECK"
+        string rowCoverageStatus = array.size(profileVolumes) > 0 ? frozenRowCoveragePass ? "PASS" : "FAIL" : "na"
+        string profileBoundaryStatus = array.size(profileVolumes) > 0 ? frozenProfileBoundaryPass ? "PASS" : "FAIL" : "na"
+        string sourceHighMatchStatus = array.size(profileVolumes) > 0 ? frozenSourceHighMatchPass ? "PASS" : "FAIL" : "na"
+        string sourceLowMatchStatus = array.size(profileVolumes) > 0 ? frozenSourceLowMatchPass ? "PASS" : "FAIL" : "na"
+        string histogramVerticalRangeStatus = array.size(profileVolumes) > 0 ? frozenHistogramVerticalRangePass ? "PASS" : "FAIL" : "na"
+        string m1AlignmentStatus = m1ValidationTimeframe ? "PASS" : "FAIL"
         string debugText = "Test: " + testLabel
         debugText += "\nConfig: " + f_configuration_fingerprint()
         debugText += "\nSymbol: " + syminfo.tickerid
         debugText += "\nTimeframe: " + timeframe.period
+        if not m1ValidationTimeframe
+            debugText += "\nValidation Warning: Client baseline uses M1."
         debugText += "\nSession: " + profileSession + " " + sessionTimezone
         debugText += "\nComparison Mode: " + (nativeFrvpComparisonMode ? "On" : "Off")
         debugText += "\nRows: " + str.tostring(profileRows)
         debugText += "\nEnabled Ranks: " + f_enabled_ranks_summary()
         debugText += "\nLongs / Shorts: " + (tradeLongs ? "On" : "Off") + " / " + (tradeShorts ? "On" : "Off")
         debugText += "\nHistogram: " + ((showVolumeProfileHistogram or nativeFrvpComparisonMode) ? "On " + str.tostring(profileVisualWidth) + " bars" : "Off")
+        debugText += "\nHistogram Orientation: " + histogramOrientation
+        debugText += "\nHistogram Placement: " + histogramPlacement
         debugText += "\nLVN Method: " + lvnMethod
         debugText += "\nThreshold: " + str.tostring(lvnThresholdPct, "#.##") + "%"
         debugText += "\nSurrounding Rows: " + str.tostring(surroundingRows)
+        debugText += "\nBoundary Mode: " + clientThresholdBoundaryMode
+        debugText += "\nHVN Boundary Search Rows: " + str.tostring(hvnBoundarySearchRows)
         debugText += "\nContrast Filter: " + (useContrastFilter ? "On >= " + str.tostring(minContrastRatio, "#.##") + "x" : "Off")
         debugText += "\nFreshness: " + lvnFreshnessMode
         debugText += "\nApproach Distance: " + str.tostring(minimumApproachDistance, "#.##")
@@ -1227,23 +1934,81 @@ if barstate.islast
         debugText += riskMode == "Fixed Points" ? "\nFixed SL / TP: " + str.tostring(fixedSLPoints, "#.##") + " / " + str.tostring(fixedTPPoints, "#.##") : "\nR / Buffer: " + str.tostring(rrMultiple, "#.##") + " / " + str.tostring(lvnBoundaryBuffer, "#.##")
         debugText += "\nOrder Size: " + str.tostring(orderQty, "#.##")
         debugText += "\nSource Session Date: " + f_format_date(frozenSessionStartTime)
-        debugText += "\nSource Session Start: " + f_format_timestamp(frozenSessionStartTime)
-        debugText += "\nSource Session End: " + f_format_timestamp(frozenSessionEndTime)
+        debugText += "\nSource Session Start Timestamp: " + f_format_timestamp(frozenSessionStartTime)
+        debugText += "\nSource Session End Timestamp: " + f_format_timestamp(frozenSessionEndTime)
+        debugText += "\nFirst Included Bar Time: " + f_format_timestamp(frozenFirstIncludedBarTime)
+        debugText += "\nLast Included Bar Time: " + f_format_timestamp(frozenLastIncludedBarTime)
+        debugText += "\nFirst Included Bar Index: " + (not na(frozenFirstIncludedBarIndex) ? str.tostring(frozenFirstIncludedBarIndex) : "na")
+        debugText += "\nLast Included Bar Index: " + (not na(frozenLastIncludedBarIndex) ? str.tostring(frozenLastIncludedBarIndex) : "na")
+        debugText += "\nSource Bars Included: " + str.tostring(frozenSourceBarCount)
+        debugText += "\nSource Session Complete: " + (frozenSourceSessionAppearsIncomplete ? "CHECK" : "PASS")
         debugText += "\nFrozen High: " + (not na(frozenSessionHigh) ? str.tostring(frozenSessionHigh, format.mintick) : "na")
         debugText += "\nFrozen Low: " + (not na(frozenSessionLow) ? str.tostring(frozenSessionLow, format.mintick) : "na")
         debugText += "\nProfile Range: " + (not na(frozenProfileRange) ? str.tostring(frozenProfileRange, "#.####") : "na")
         debugText += "\nRow Height: " + (not na(frozenRowHeight) ? str.tostring(frozenRowHeight, format.mintick) : "na")
+        debugText += "\nExpected Top Row High: " + (not na(frozenExpectedTopRowHigh) ? str.tostring(frozenExpectedTopRowHigh, format.mintick) : "na")
+        debugText += "\nExpected Bottom Row Low: " + (not na(frozenExpectedBottomRowLow) ? str.tostring(frozenExpectedBottomRowLow, format.mintick) : "na")
+        debugText += "\nProfile Boundary Status: " + profileBoundaryStatus
+        debugText += "\nRow Coverage Status: " + rowCoverageStatus
+        debugText += "\nSource High Match: " + sourceHighMatchStatus
+        debugText += "\nSource Low Match: " + sourceLowMatchStatus
+        debugText += "\nHistogram Vertical Range Match: " + histogramVerticalRangeStatus
         debugText += "\nMax Row Volume: " + (not na(frozenMaxRowVolume) ? str.tostring(frozenMaxRowVolume, "#.##") : "na")
         debugText += "\nPOC Row: " + (not na(previousPocRow) ? str.tostring(previousPocRow + 1) : "na")
         debugText += "\nPOC Price: " + (not na(previousPocPrice) ? str.tostring(previousPocPrice, format.mintick) : "na")
+        debugText += "\nCalculated Rows: " + str.tostring(array.size(profileVolumes))
         debugText += "\nRendered Rows: " + str.tostring(frozenRenderedRowCount)
+        debugText += "\nRendered Nonzero Rows: " + str.tostring(frozenRenderedNonzeroRowCount)
+        debugText += "\nHistogram Anchor Bar Index: " + (not na(frozenProfileAnchorBarIndex) ? str.tostring(frozenProfileAnchorBarIndex) : "na")
+        debugText += "\nHistogram Left Edge: " + (not na(frozenHistogramLeftEdge) ? str.tostring(frozenHistogramLeftEdge) : "na")
+        debugText += "\nHistogram Right Edge: " + (not na(frozenHistogramRightEdge) ? str.tostring(frozenHistogramRightEdge) : "na")
+        debugText += "\nProfile Visual Width: " + str.tostring(profileVisualWidth)
         debugText += "\nProfile Vol Sum: " + (not na(frozenProfileVolumeSum) ? str.tostring(frozenProfileVolumeSum, "#.##") : "na")
         debugText += "\nSource Session Vol: " + (not na(frozenSourceSessionVolume) ? str.tostring(frozenSourceSessionVolume, "#.##") : "na")
         debugText += "\nVolume Delta: " + (not na(profileVolumeDelta) ? str.tostring(profileVolumeDelta, "#.##") : "na")
         debugText += "\nConservation Error: " + (not na(frozenVolumeConservationErrorPct) ? str.tostring(frozenVolumeConservationErrorPct, "#.####") + "%" : "na")
         debugText += "\nConservation Status: " + conservationStatus
+        debugText += "\nFRVP Alignment M1: " + m1AlignmentStatus
         debugText += "\nMinutes To Session End: " + (not na(minutesToSessionEnd) ? str.tostring(minutesToSessionEnd) : "na")
         debugText += "\nDetected LVNs: " + str.tostring(array.size(tradableCenters))
+        if lvnMethod == "Client Threshold Valley"
+            string boundaryStatus = not na(frozenBestMergedRegionDepthRatio) ? (frozenBestMergedRegionBoundaryPass ? "PASS" : "FAIL") : "na"
+            string contrastStatus = not na(frozenBestMergedRegionDepthRatio) ? (frozenBestMergedRegionContrastPass ? "PASS" : "FAIL") : "na"
+            debugText += "\nLocal Threshold Candidates: " + str.tostring(frozenLocalThresholdCandidates)
+            debugText += "\nMerged Low-Volume Regions: " + str.tostring(frozenMergedLowVolumeRegions)
+            debugText += "\nPre-Detector Snapshot Size: " + str.tostring(frozenPreDetectorProfileVolumeSize)
+            debugText += "\nPre-Detector Snapshot Sum: " + (not na(frozenPreDetectorProfileVolumeSum) ? str.tostring(frozenPreDetectorProfileVolumeSum, "#.##") : "na")
+            debugText += "\nPre-Detector Snapshot Min / Max: " + (not na(frozenPreDetectorProfileVolumeMin) ? str.tostring(frozenPreDetectorProfileVolumeMin, "#.##") : "na") + " / " + (not na(frozenPreDetectorProfileVolumeMax) ? str.tostring(frozenPreDetectorProfileVolumeMax, "#.##") : "na")
+            debugText += "\nPrepare Function Entry Volumes Size: " + str.tostring(frozenPrepareEntryVolumesSize)
+            debugText += "\nPrepare Function Entry Row Sizes: " + str.tostring(frozenPrepareEntryRowLowsSize) + " / " + str.tostring(frozenPrepareEntryRowHighsSize)
+            debugText += "\nPrepare Function Entry Sum / Min / Max: " + (not na(frozenPrepareEntryVolumesSum) ? str.tostring(frozenPrepareEntryVolumesSum, "#.##") : "na") + " / " + (not na(frozenPrepareEntryVolumesMin) ? str.tostring(frozenPrepareEntryVolumesMin, "#.##") : "na") + " / " + (not na(frozenPrepareEntryVolumesMax) ? str.tostring(frozenPrepareEntryVolumesMax, "#.##") : "na")
+            debugText += "\nPrepare Function After Clear Volumes Size: " + str.tostring(frozenPrepareAfterClearVolumesSize)
+            debugText += "\nPrepare Function After Clear Row Sizes: " + str.tostring(frozenPrepareAfterClearRowLowsSize) + " / " + str.tostring(frozenPrepareAfterClearRowHighsSize)
+            debugText += "\nPrepare Function After Clear Sum / Min / Max: " + (not na(frozenPrepareAfterClearVolumesSum) ? str.tostring(frozenPrepareAfterClearVolumesSum, "#.##") : "na") + " / " + (not na(frozenPrepareAfterClearVolumesMin) ? str.tostring(frozenPrepareAfterClearVolumesMin, "#.##") : "na") + " / " + (not na(frozenPrepareAfterClearVolumesMax) ? str.tostring(frozenPrepareAfterClearVolumesMax, "#.##") : "na")
+            debugText += "\nDetector Entry SourceVolumes Size: " + str.tostring(frozenDetectorEntrySourceVolumesSize)
+            debugText += "\nDetector Entry RowLows / RowHighs Size: " + str.tostring(frozenDetectorEntrySourceRowLowsSize) + " / " + str.tostring(frozenDetectorEntrySourceRowHighsSize)
+            debugText += "\nDetector Entry Numeric / Positive Volumes: " + str.tostring(frozenDetectorEntryNumericSourceVolumes) + " / " + str.tostring(frozenDetectorEntryPositiveSourceVolumes)
+            debugText += "\nDetector Entry Min / Max / Sum: " + (not na(frozenDetectorEntryMinSourceVolume) ? str.tostring(frozenDetectorEntryMinSourceVolume, "#.##") : "na") + " / " + (not na(frozenDetectorEntryMaxSourceVolume) ? str.tostring(frozenDetectorEntryMaxSourceVolume, "#.##") : "na") + " / " + (not na(frozenDetectorEntrySumSourceVolume) ? str.tostring(frozenDetectorEntrySumSourceVolume, "#.##") : "na")
+            debugText += "\nDetector Snapshot Match: " + (frozenDetectorSnapshotMatch ? "PASS" : "FAIL")
+            debugText += "\nEvaluable Interior Rows: " + str.tostring(frozenEvaluableInteriorRows)
+            debugText += "\nRows With Valid Surrounding Average: " + str.tostring(frozenRowsWithValidSurroundingAverage)
+            debugText += "\nBest Raw Row Depth Ratio: " + (not na(frozenBestRawRowDepthRatio) ? str.tostring(frozenBestRawRowDepthRatio, "#.####") : "na")
+            debugText += "\nMinimum Raw Depth Ratio Across All Valid Interior Rows: " + (not na(frozenMinimumRawDepthRatioAcrossAllValidInteriorRows) ? str.tostring(frozenMinimumRawDepthRatioAcrossAllValidInteriorRows, "#.####") : "na")
+            debugText += "\nBest Merged Region Depth Ratio: " + (not na(frozenBestMergedRegionDepthRatio) ? str.tostring(frozenBestMergedRegionDepthRatio, "#.####") : "na")
+            debugText += "\nBest Merged Region Surrounding Avg: " + (not na(frozenBestMergedRegionSurroundingAvg) ? str.tostring(frozenBestMergedRegionSurroundingAvg, "#.##") : "na")
+            debugText += "\nLower HVN Found: " + (frozenBestLowerHvnFound ? "Yes" : "No")
+            debugText += "\nUpper HVN Found: " + (frozenBestUpperHvnFound ? "Yes" : "No")
+            debugText += "\nDistance To Lower HVN: " + (not na(frozenDistanceToLowerHvn) ? str.tostring(frozenDistanceToLowerHvn) : "na")
+            debugText += "\nDistance To Upper HVN: " + (not na(frozenDistanceToUpperHvn) ? str.tostring(frozenDistanceToUpperHvn) : "na")
+            debugText += "\nRegion Boundary: " + boundaryStatus
+            debugText += "\nContrast: " + contrastStatus
+            debugText += "\nFinal Qualifying LVNs: " + str.tostring(frozenFinalQualifyingLvns)
+            if str.length(frozenDetectorProbeFixedText) > 0
+                debugText += "\n" + frozenDetectorProbeFixedText
+            if str.length(frozenDetectorProbePocText) > 0
+                debugText += "\n" + frozenDetectorProbePocText
+            if str.length(frozenBestMergedRegionReason) > 0
+                debugText += "\nClient Threshold Diagnostic: " + frozenBestMergedRegionReason
         if array.size(tradableCenters) > 0
             debugText += "\nTop Depth: " + str.tostring(array.get(tradableDepthRatios, 0) * 100.0, "#.##") + "%"
             debugText += "\nTop Contrast: " + str.tostring(array.get(tradableContrastRatios, 0), "#.##") + "x"
@@ -1264,3 +2029,18 @@ if barstate.islast
                     bool fixedRiskMatch = not na(activeRiskPoints) and not na(activeRewardPoints) and math.abs(activeRiskPoints - fixedSLPoints) <= syminfo.mintick and math.abs(activeRewardPoints - fixedTPPoints) <= syminfo.mintick
                     debugText += "\nFixed Risk Match: " + (fixedRiskMatch ? "Yes" : "No")
         debugLabel := label.new(bar_index, low, text = debugText, style = label.style_label_lower_left, color = color.new(color.navy, 15), textcolor = color.white, size = size.small)
+
+    if nativeFrvpComparisonMode and not na(frozenFirstIncludedBarIndex) and not na(frozenLastIncludedBarIndex) and not na(frozenSessionHigh) and not na(frozenSessionLow)
+        comparisonSourceSessionBox := box.new(frozenFirstIncludedBarIndex, frozenSessionHigh, frozenLastIncludedBarIndex, frozenSessionLow, xloc = xloc.bar_index, bgcolor = color.new(color.aqua, 92), border_color = color.new(color.aqua, 45), border_width = 1)
+        frvpStartLine := line.new(frozenFirstIncludedBarIndex, frozenSessionLow, frozenFirstIncludedBarIndex, frozenSessionHigh, xloc = xloc.bar_index, color = color.new(color.aqua, 0), width = 2, style = line.style_dashed)
+        frvpEndLine := line.new(frozenLastIncludedBarIndex, frozenSessionLow, frozenLastIncludedBarIndex, frozenSessionHigh, xloc = xloc.bar_index, color = color.new(color.orange, 0), width = 2, style = line.style_dashed)
+        frvpStartLabel := label.new(frozenFirstIncludedBarIndex, frozenSessionHigh, "FRVP START\n" + f_format_timestamp(frozenFirstIncludedBarTime), xloc = xloc.bar_index, style = label.style_label_down, color = color.new(color.aqua, 0), textcolor = color.black, size = size.small)
+        frvpEndLabel := label.new(frozenLastIncludedBarIndex, frozenSessionHigh, "FRVP END\n" + f_format_timestamp(frozenLastIncludedBarTime), xloc = xloc.bar_index, style = label.style_label_down, color = color.new(color.orange, 0), textcolor = color.black, size = size.small)
+        int profileLabelAnchorBarIndex = not na(frozenHistogramRightEdge) ? frozenHistogramRightEdge + 1 : bar_index
+        profileHighLabel := label.new(profileLabelAnchorBarIndex, frozenSessionHigh, "PROFILE HIGH: " + str.tostring(frozenSessionHigh, format.mintick), xloc = xloc.bar_index, style = label.style_label_left, color = color.new(color.gray, 10), textcolor = color.white, size = size.small)
+        profileLowLabel := label.new(profileLabelAnchorBarIndex, frozenSessionLow, "PROFILE LOW: " + str.tostring(frozenSessionLow, format.mintick), xloc = xloc.bar_index, style = label.style_label_left, color = color.new(color.gray, 10), textcolor = color.white, size = size.small)
+        if not na(previousPocPrice)
+            profilePocLabel := label.new(profileLabelAnchorBarIndex, previousPocPrice, "POC: " + str.tostring(previousPocPrice, format.mintick), xloc = xloc.bar_index, style = label.style_label_left, color = color.new(color.yellow, 0), textcolor = color.black, size = size.small)
+        float linkLabelPrice = frozenSessionHigh + frozenProfileRange * 0.03
+        int linkLabelBarIndex = int(math.round((frozenFirstIncludedBarIndex + frozenLastIncludedBarIndex) * 0.5))
+        profileSourceLabel := label.new(linkLabelBarIndex, linkLabelPrice, "Profile from highlighted prior session", xloc = xloc.bar_index, style = label.style_label_up, color = color.new(color.navy, 10), textcolor = color.white, size = size.small)

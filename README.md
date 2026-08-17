@@ -63,6 +63,8 @@ Use this as the Milestone 1 baseline:
 - Block New Entries Before Session End: `On`
 - Entry Cutoff Minutes: `5`
 - Show Volume Profile Histogram: `On`
+- Histogram Orientation: `TradingView Style`
+- Histogram Placement: `Before Trading Session`
 - Show Debug Diagnostics: `On` during validation
 
 These are baseline validation settings, not optimized settings.
@@ -84,7 +86,20 @@ The current default allocation method is a transparent chart-bar overlap approxi
 - bar volume is distributed across touched rows in proportion to row overlap versus candle range
 - zero-range candles are assigned to the row containing that price
 
+Row construction rules:
+
+- the profile is built from bars whose open time falls inside the configured `18:00 -> 16:00` session
+- on the canonical M1 workflow, this means the first included bar opens at `18:00`
+- the last included bar opens at `15:59` and closes at `16:00`
+- the `16:00` bar itself is not intended to belong to the frozen source session
+- rows are treated as contiguous price bins with the final top row explicitly terminated at the frozen session high
+
 The visible histogram is the latest frozen profile only. It is intentionally not drawn historically across every session by default, which keeps object usage stable and avoids chart clutter.
+
+Validation-only placement controls:
+
+- `Histogram Placement = Before Trading Session` keeps the frozen profile near Session N+1, which is helpful for live strategy context.
+- `Histogram Placement = Over Source Session` anchors the custom histogram directly against the highlighted prior source session for FRVP comparison.
 
 ## 5. LVN Definition
 
@@ -184,16 +199,24 @@ When enabled, the script emphasizes:
 - LVN zones
 - session boundaries
 - row diagnostics table
+- highlighted source-session box
+- explicit `FRVP START` and `FRVP END` markers
 
 It also reduces entry and active trade visual clutter.
+
+The default histogram orientation is `TradingView Style`, which renders rows from a fixed left anchor toward the right so visual comparison is easier against TradingView's native FRVP.
 
 Recommended comparison procedure:
 
 1. Open the chart on `CME_MINI:MNQ1!` at `1 minute`.
 2. Keep the script session at `18:00 -> 16:00 America/New_York`.
-3. Set both the script and TradingView FRVP to `24` rows.
-4. Compare the same completed session.
-5. Check:
+3. Enable `Native FRVP Comparison Mode`.
+4. Read the script's source-session timestamps in diagnostics.
+5. Place the native FRVP first anchor on the `18:00` bar.
+6. Place the native FRVP second anchor on the `15:59` bar.
+7. Set both the script and TradingView FRVP to `24` rows.
+8. Compare the same completed session.
+9. Check:
    - profile high
    - profile low
    - row boundaries
@@ -203,16 +226,28 @@ Recommended comparison procedure:
    - major LVNs
    - LVN zone boundaries
 
+Do not compare profitability until the profile itself is validated.
+
 Debug mode now exposes validation fields such as:
 
 - source session date
 - source session start and end timestamps
+- first included bar time
+- last included bar time
+- source bars included
 - frozen high and low
 - profile range
 - row height
+- expected top row high
+- expected bottom row low
+- profile boundary status
+- row coverage status
 - maximum row volume
 - POC row and price
 - rendered row count
+- histogram anchor bar index
+- histogram left edge
+- histogram right edge
 - profile volume sum
 - source session volume
 - volume delta
@@ -229,6 +264,25 @@ Debug mode now exposes validation fields such as:
 - LVN flag
 - depth
 - contrast
+
+TradingView's native FRVP may split each row into multiple colors for up/down volume. For comparison with this custom script, compare the native row's total horizontal width across all color segments combined, not a single colored slice.
+
+## Native FRVP Comparison — M1
+
+Use this checklist for direct visual validation:
+
+1. Load `CME_MINI:MNQ1!`.
+2. Use `1-minute` standard candles.
+3. Enable `Native FRVP Comparison Mode`.
+4. Find the highlighted `Source Session` box.
+5. Read `Source Session Start/End` and `FRVP START/END` in the diagnostics and labels.
+6. Select TradingView Fixed Range Volume Profile.
+7. Place point #1 on the bar marked `FRVP START`.
+8. Place point #2 on the bar marked `FRVP END`.
+9. The final included M1 candle should be `15:59`. Do not include the `16:00` candle.
+10. Set native FRVP rows to `24`.
+11. Compare the native FRVP row's full horizontal width, with all colored segments combined, against the custom row width.
+12. Verify both profiles share the same high and low before judging POC or LVNs.
 
 ## 10. Baseline Backtest Procedure
 
