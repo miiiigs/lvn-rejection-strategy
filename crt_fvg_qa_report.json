@@ -1,0 +1,593 @@
+{
+  "pine_file": "/mnt/data/crt_fvg_indicator(4).pine",
+  "sha256": "882d3e51c3d05b282bbd504c1e2786a0170509d89a02fa98a28cfbeef6f2684c",
+  "total_tests": 87,
+  "passed": 87,
+  "failed": 0,
+  "categories": {
+    "Static source": {
+      "passed": 37,
+      "failed": 0,
+      "total": 37
+    },
+    "Deterministic logic": {
+      "passed": 17,
+      "failed": 0,
+      "total": 17
+    },
+    "Session": {
+      "passed": 12,
+      "failed": 0,
+      "total": 12
+    },
+    "Ownership": {
+      "passed": 6,
+      "failed": 0,
+      "total": 6
+    },
+    "Display modes": {
+      "passed": 4,
+      "failed": 0,
+      "total": 4
+    },
+    "Fill lifecycle": {
+      "passed": 3,
+      "failed": 0,
+      "total": 3
+    },
+    "Anchoring": {
+      "passed": 2,
+      "failed": 0,
+      "total": 2
+    },
+    "Randomized": {
+      "passed": 1,
+      "failed": 0,
+      "total": 1
+    },
+    "MNQ integration": {
+      "passed": 5,
+      "failed": 0,
+      "total": 5
+    }
+  },
+  "mnq_integration": {
+    "rows_1m": 19717,
+    "eligible_1m_windows": 19672,
+    "raw_bull_1m": 1909,
+    "raw_bear_1m": 1818,
+    "complete_5m_bars": 3943,
+    "eligible_5m_windows": 3898,
+    "raw_bull_5m": 444,
+    "raw_bear_5m": 354
+  },
+  "results": [
+    {
+      "category": "Static source",
+      "name": "Pine v6",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Static source",
+      "name": "Indicator, not strategy",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Static source",
+      "name": "Object caps within TradingView limits",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Static source",
+      "name": "Session constants 18:00-17:00 boundary",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Static source",
+      "name": "Default timezone New York",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Static source",
+      "name": "CRT dual sweep rejection present",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Static source",
+      "name": "Bull CRT predicate exact structure",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Static source",
+      "name": "Bear CRT predicate exact structure",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Static source",
+      "name": "Minimum range equality passes",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Static source",
+      "name": "4H confirmed SMA200 uses [1]",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Static source",
+      "name": "15m confirmed offsets [2]/[1]",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Static source",
+      "name": "30m confirmed offsets [2]/[1]",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Static source",
+      "name": "Bull FVG strict predicate",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Static source",
+      "name": "Bear FVG strict predicate",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Static source",
+      "name": "1m FVG Candle A anchor time[2]",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Static source",
+      "name": "1m confirmation is Candle C close",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Static source",
+      "name": "5m lower-chart Candle A uses time[3]",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Static source",
+      "name": "5m lower-chart Candle C uses [1]",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Static source",
+      "name": "FVG box left edge uses Candle A time",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Static source",
+      "name": "Confirmation time remains stored separately",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Static source",
+      "name": "Bullish FVG default green",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Static source",
+      "name": "Bearish FVG default red",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Static source",
+      "name": "CRT timeframe colors separated from FVG",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Static source",
+      "name": "FVG labels available and default off",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Static source",
+      "name": "Three FVG display modes present",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Static source",
+      "name": "Hidden FVGs not added to display arrays",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Static source",
+      "name": "Metrics recorded independently of display creation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Static source",
+      "name": "Most Recent fully removes prior display record",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Static source",
+      "name": "FVG fill predicates exact",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Static source",
+      "name": "Native FVG blocks retroactive Candle C fill",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Static source",
+      "name": "Lower-chart 5m permits activation-bar fill",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Static source",
+      "name": "CRT lifecycle runs before FVG processing",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Static source",
+      "name": "Owner must match direction/session and precede FVG",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Static source",
+      "name": "Owner selection scans newest to oldest",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Static source",
+      "name": "FVG A/B/C same-session guard",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Static source",
+      "name": "No invalid descending by -1 loop",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Static source",
+      "name": "Comparison table exposes eligible CRT denominator",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Deterministic logic",
+      "name": "Bull CRT canonical positive",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Deterministic logic",
+      "name": "Bull CRT rejects C2 high above C1",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Deterministic logic",
+      "name": "Bull CRT rejects close equal C1 low",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Deterministic logic",
+      "name": "Bull CRT rejects close equal C1 high",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Deterministic logic",
+      "name": "Bull CRT rejects dual sweep",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Deterministic logic",
+      "name": "Bear CRT canonical positive",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Deterministic logic",
+      "name": "Bear CRT rejects C2 low below C1",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Deterministic logic",
+      "name": "Bear CRT rejects close equal C1 low",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Deterministic logic",
+      "name": "Bear CRT rejects close equal C1 high",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Deterministic logic",
+      "name": "Bull FVG strict positive",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Deterministic logic",
+      "name": "Bull FVG equality rejected",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Deterministic logic",
+      "name": "Bear FVG strict positive",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Deterministic logic",
+      "name": "Bear FVG equality rejected",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Deterministic logic",
+      "name": "Bull FVG partial fill stays active",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Deterministic logic",
+      "name": "Bull FVG full fill triggers",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Deterministic logic",
+      "name": "Bear FVG partial fill stays active",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Deterministic logic",
+      "name": "Bear FVG full fill triggers",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Session",
+      "name": "17:59 outside session",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Session",
+      "name": "18:00 inside session",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Session",
+      "name": "23:59 inside session",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Session",
+      "name": "00:00 inside prior session",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Session",
+      "name": "16:59 inside session",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Session",
+      "name": "17:00 outside session",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Session",
+      "name": "DST spring 16:59 inside",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Session",
+      "name": "DST spring 17:00 outside",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Session",
+      "name": "DST fall 16:59 inside",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Session",
+      "name": "DST fall 17:00 outside",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Session",
+      "name": "00:00 and prior-day 18:00 share session key",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Session",
+      "name": "Next 18:00 starts new session key",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Ownership",
+      "name": "Newest eligible same-direction CRT owns FVG",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Ownership",
+      "name": "Completed CRT cannot own FVG",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Ownership",
+      "name": "Direction mismatch cannot own FVG",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Ownership",
+      "name": "CRT confirmation must strictly precede FVG",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Ownership",
+      "name": "Bull CRT target hit same bar blocks FVG ownership",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Ownership",
+      "name": "Bear CRT target hit same bar blocks FVG ownership",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Display modes",
+      "name": "First: 150 events -> 150 metrics / 1 display",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Display modes",
+      "name": "Most Recent: 150 events -> latest only",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Display modes",
+      "name": "All: 150 events cap 100 -> latest 100 displays",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Display modes",
+      "name": "First is independent per 1m/5m stream",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Fill lifecycle",
+      "name": "Native 1m cannot fill on creation bar",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Fill lifecycle",
+      "name": "Native 1m can fill next bar",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Fill lifecycle",
+      "name": "Lower-chart confirmed 5m can fill activation bar",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Anchoring",
+      "name": "1m A start is 2 bars before C, confirmation at C close",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Anchoring",
+      "name": "5m lower-chart A starts 15m before confirmation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "Randomized",
+      "name": "CRT/FVG mutual-exclusion and invariant fuzzing",
+      "passed": true,
+      "detail": "200,000 randomized candle pairs/triples; 0 invariant violations"
+    },
+    {
+      "category": "MNQ integration",
+      "name": "CSV has monotonic 1m data",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "MNQ integration",
+      "name": "OHLC validity",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "MNQ integration",
+      "name": "Raw 1m data contains both bullish and bearish FVGs",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "MNQ integration",
+      "name": "Raw 5m data contains both bullish and bearish FVGs",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "category": "MNQ integration",
+      "name": "No cross-session FVG windows included",
+      "passed": true,
+      "detail": ""
+    }
+  ],
+  "limitations": [
+    "This environment cannot execute TradingView Pine Script or reproduce Pine realtime rollback directly.",
+    "Static assertions verify the uploaded source text; behavioral tests use an independent Python reference model.",
+    "The supplied MNQ CSV is too short to independently warm a 4H SMA200, so MNQ integration validates raw/session-scoped FVG behavior rather than full SMA-gated CRT ownership."
+  ]
+}
