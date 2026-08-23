@@ -707,6 +707,8 @@ f_update_crt_lifecycle() =>
 
 bool supports15mStream = f_chart_supports_stream(CRT_15M)
 bool supports30mStream = f_chart_supports_stream(CRT_30M)
+bool useNative15mCrt = timeframe.isintraday and timeframe.in_seconds() == timeframe.in_seconds(CRT_15M)
+bool useNative30mCrt = timeframe.isintraday and timeframe.in_seconds() == timeframe.in_seconds(CRT_30M)
 bool supports1mFvgStream = timeframe.isintraday and timeframe.in_seconds() == 60
 bool supports5mFvgStream = f_chart_supports_stream(FVG_5M)
 bool useNative5mFvg = timeframe.isintraday and timeframe.in_seconds() == timeframe.in_seconds(FVG_5M)
@@ -724,25 +726,25 @@ plot(show4h200Sma ? confirmed4hSma200 : na, "Confirmed 4H SMA 200", color = colo
 
 // Each CRT stream uses confirmed source candles only:
 // C2 is the most recently completed source candle [1], and C1 is the candle immediately before it [2].
-int confirmationTime15 = request.security(syminfo.tickerid, CRT_15M, time_close[1], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
-int rangeStartTime15 = request.security(syminfo.tickerid, CRT_15M, time[2], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
-float c1High15 = request.security(syminfo.tickerid, CRT_15M, high[2], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
-float c1Low15 = request.security(syminfo.tickerid, CRT_15M, low[2], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
-float c2High15 = request.security(syminfo.tickerid, CRT_15M, high[1], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
-float c2Low15 = request.security(syminfo.tickerid, CRT_15M, low[1], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
-float c2Close15 = request.security(syminfo.tickerid, CRT_15M, close[1], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
-int c1SessionKey15 = request.security(syminfo.tickerid, CRT_15M, f_session_key(time[2]), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
-int c2SessionKey15 = request.security(syminfo.tickerid, CRT_15M, f_session_key(time[1]), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+int confirmationTime15 = useNative15mCrt ? time_close : request.security(syminfo.tickerid, CRT_15M, time_close[1], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+int rangeStartTime15 = useNative15mCrt ? time[1] : request.security(syminfo.tickerid, CRT_15M, time[2], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+float c1High15 = useNative15mCrt ? high[1] : request.security(syminfo.tickerid, CRT_15M, high[2], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+float c1Low15 = useNative15mCrt ? low[1] : request.security(syminfo.tickerid, CRT_15M, low[2], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+float c2High15 = useNative15mCrt ? high : request.security(syminfo.tickerid, CRT_15M, high[1], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+float c2Low15 = useNative15mCrt ? low : request.security(syminfo.tickerid, CRT_15M, low[1], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+float c2Close15 = useNative15mCrt ? close : request.security(syminfo.tickerid, CRT_15M, close[1], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+int c1SessionKey15 = useNative15mCrt ? f_session_key(time[1]) : request.security(syminfo.tickerid, CRT_15M, f_session_key(time[2]), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+int c2SessionKey15 = useNative15mCrt ? f_session_key(time) : request.security(syminfo.tickerid, CRT_15M, f_session_key(time[1]), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
 
-int confirmationTime30 = request.security(syminfo.tickerid, CRT_30M, time_close[1], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
-int rangeStartTime30 = request.security(syminfo.tickerid, CRT_30M, time[2], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
-float c1High30 = request.security(syminfo.tickerid, CRT_30M, high[2], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
-float c1Low30 = request.security(syminfo.tickerid, CRT_30M, low[2], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
-float c2High30 = request.security(syminfo.tickerid, CRT_30M, high[1], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
-float c2Low30 = request.security(syminfo.tickerid, CRT_30M, low[1], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
-float c2Close30 = request.security(syminfo.tickerid, CRT_30M, close[1], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
-int c1SessionKey30 = request.security(syminfo.tickerid, CRT_30M, f_session_key(time[2]), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
-int c2SessionKey30 = request.security(syminfo.tickerid, CRT_30M, f_session_key(time[1]), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+int confirmationTime30 = useNative30mCrt ? time_close : request.security(syminfo.tickerid, CRT_30M, time_close[1], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+int rangeStartTime30 = useNative30mCrt ? time[1] : request.security(syminfo.tickerid, CRT_30M, time[2], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+float c1High30 = useNative30mCrt ? high[1] : request.security(syminfo.tickerid, CRT_30M, high[2], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+float c1Low30 = useNative30mCrt ? low[1] : request.security(syminfo.tickerid, CRT_30M, low[2], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+float c2High30 = useNative30mCrt ? high : request.security(syminfo.tickerid, CRT_30M, high[1], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+float c2Low30 = useNative30mCrt ? low : request.security(syminfo.tickerid, CRT_30M, low[1], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+float c2Close30 = useNative30mCrt ? close : request.security(syminfo.tickerid, CRT_30M, close[1], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+int c1SessionKey30 = useNative30mCrt ? f_session_key(time[1]) : request.security(syminfo.tickerid, CRT_30M, f_session_key(time[2]), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+int c2SessionKey30 = useNative30mCrt ? f_session_key(time) : request.security(syminfo.tickerid, CRT_30M, f_session_key(time[1]), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
 
 int fvg1mStartTime = time[2]
 int fvg1mConfirmationTime = time_close
@@ -771,8 +773,8 @@ bool valid30mSessionPair = c1SessionKey30 >= 0 and c1SessionKey30 == c2SessionKe
 bool valid1mFvgSessionTriple = fvg1mSessionKeyA >= 0 and fvg1mSessionKeyA == fvg1mSessionKeyB and fvg1mSessionKeyB == fvg1mSessionKeyC and f_is_in_client_session(fvg1mConfirmationTime)
 bool valid5mFvgSessionTriple = fvg5mSessionKeyA >= 0 and fvg5mSessionKeyA == fvg5mSessionKeyB and fvg5mSessionKeyB == fvg5mSessionKeyC and f_is_in_client_session(fvg5mConfirmationTime)
 
-bool new15mEvent = enable15mCrt and supports15mStream and valid15mSessionPair and not na(confirmationTime15) and ta.change(confirmationTime15) != 0
-bool new30mEvent = enable30mCrt and supports30mStream and valid30mSessionPair and not na(confirmationTime30) and ta.change(confirmationTime30) != 0
+bool new15mEvent = enable15mCrt and supports15mStream and valid15mSessionPair and (useNative15mCrt ? barstate.isconfirmed : not na(confirmationTime15) and ta.change(confirmationTime15) != 0)
+bool new30mEvent = enable30mCrt and supports30mStream and valid30mSessionPair and (useNative30mCrt ? barstate.isconfirmed : not na(confirmationTime30) and ta.change(confirmationTime30) != 0)
 bool new1mFvgEvent = enableFvgDetection and supports1mFvgStream and valid1mFvgSessionTriple and barstate.isconfirmed
 bool new5mFvgEvent = enableFvgDetection and supports5mFvgStream and valid5mFvgSessionTriple and (useNative5mFvg ? barstate.isconfirmed : not na(fvg5mConfirmationTime) and ta.change(fvg5mConfirmationTime) != 0)
 
@@ -780,17 +782,17 @@ if new15mEvent and not na(c1High15) and not na(c1Low15) and not na(rangeStartTim
     bool bullish15m = f_is_bullish_crt(c1High15, c1Low15, c2High15, c2Low15, c2Close15) and f_passes_sma_filter(DIRECTION_BULLISH, c2Close15, confirmed4hSma200)
     bool bearish15m = f_is_bearish_crt(c1High15, c1Low15, c2High15, c2Low15, c2Close15) and f_passes_sma_filter(DIRECTION_BEARISH, c2Close15, confirmed4hSma200)
     if bullish15m
-        f_add_crt(15, DIRECTION_BULLISH, c1High15, c1Low15, rangeStartTime15, confirmationTime15, bar_index, c2SessionKey15, time_close)
+        f_add_crt(15, DIRECTION_BULLISH, c1High15, c1Low15, rangeStartTime15, confirmationTime15, useNative15mCrt ? bar_index + 1 : bar_index, c2SessionKey15, time_close)
     if bearish15m
-        f_add_crt(15, DIRECTION_BEARISH, c1High15, c1Low15, rangeStartTime15, confirmationTime15, bar_index, c2SessionKey15, time_close)
+        f_add_crt(15, DIRECTION_BEARISH, c1High15, c1Low15, rangeStartTime15, confirmationTime15, useNative15mCrt ? bar_index + 1 : bar_index, c2SessionKey15, time_close)
 
 if new30mEvent and not na(c1High30) and not na(c1Low30) and not na(rangeStartTime30) and f_passes_minimum_range_filter(c1High30, c1Low30)
     bool bullish30m = f_is_bullish_crt(c1High30, c1Low30, c2High30, c2Low30, c2Close30) and f_passes_sma_filter(DIRECTION_BULLISH, c2Close30, confirmed4hSma200)
     bool bearish30m = f_is_bearish_crt(c1High30, c1Low30, c2High30, c2Low30, c2Close30) and f_passes_sma_filter(DIRECTION_BEARISH, c2Close30, confirmed4hSma200)
     if bullish30m
-        f_add_crt(30, DIRECTION_BULLISH, c1High30, c1Low30, rangeStartTime30, confirmationTime30, bar_index, c2SessionKey30, time_close)
+        f_add_crt(30, DIRECTION_BULLISH, c1High30, c1Low30, rangeStartTime30, confirmationTime30, useNative30mCrt ? bar_index + 1 : bar_index, c2SessionKey30, time_close)
     if bearish30m
-        f_add_crt(30, DIRECTION_BEARISH, c1High30, c1Low30, rangeStartTime30, confirmationTime30, bar_index, c2SessionKey30, time_close)
+        f_add_crt(30, DIRECTION_BEARISH, c1High30, c1Low30, rangeStartTime30, confirmationTime30, useNative30mCrt ? bar_index + 1 : bar_index, c2SessionKey30, time_close)
 
 f_update_crt_lifecycle()
 
