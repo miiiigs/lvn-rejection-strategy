@@ -45,7 +45,7 @@ bool enable15mCrt = input.bool(true, "Enable 15m CRT", group = GROUP_STREAMS)
 
 bool enableMinimumRangeFilter = input.bool(false, "Enable Minimum Range Filter", group = GROUP_FILTERS)
 float minimumRange = input.float(0.0, "Minimum Range", minval = 0.0, step = 0.25, group = GROUP_FILTERS)
-string rangeUnit = input.string("Price", "Range Unit", options = ["Price", "Ticks"], group = GROUP_FILTERS)
+string rangeUnit = input.string("Points", "Range Unit", options = ["Points", "Ticks"], group = GROUP_FILTERS)
 
 string sessionTimezoneChoice = input.string(
     SESSION_TZ_NY,
@@ -187,10 +187,11 @@ f_crt_color(int streamMinutes, int direction) =>
 f_is_dual_sweep(float c1High, float c1Low, float c2High, float c2Low) =>
     c2High > c1High and c2Low < c1Low
 
-f_passes_minimum_range_filter(float rangeHigh, float rangeLow) =>
-    float rangeSize = rangeHigh - rangeLow
-    float rangeTicks = syminfo.mintick > 0 ? rangeSize / syminfo.mintick : na
-    not enableMinimumRangeFilter or (rangeUnit == "Price" ? rangeSize >= minimumRange : not na(rangeTicks) and rangeTicks >= minimumRange)
+f_passes_minimum_range_filter(float referenceLevel, float breakoutLevel) =>
+    float rangePoints = math.abs(referenceLevel - breakoutLevel)
+    float rangeTicks = syminfo.mintick > 0 ? rangePoints / syminfo.mintick : na
+    bool usePointUnits = rangeUnit == "Points" or rangeUnit == "Price"
+    not enableMinimumRangeFilter or (usePointUnits ? rangePoints >= minimumRange : not na(rangeTicks) and rangeTicks >= minimumRange)
 
 f_is_bullish_crt(float c1High, float c1Low, float c2High, float c2Low, float c2Close) =>
     not f_is_dual_sweep(c1High, c1Low, c2High, c2Low) and c2High <= c1High and c2Low < c1Low and c2Close > c1Low and c2Close < c1High
@@ -837,7 +838,7 @@ bool new15mEvent = enable15mCrt and supports15mStream and valid15mSessionPair an
 bool new1mFvgEvent = enableFvgDetection and supports1mFvgStream and valid1mFvgSessionTriple and barstate.isconfirmed
 bool new5mFvgEvent = enableFvgDetection and supports5mFvgStream and valid5mFvgSessionTriple and (useNative5mFvg ? barstate.isconfirmed : not na(fvg5mConfirmationTime) and ta.change(fvg5mConfirmationTime) != 0)
 
-if new15mEvent and not na(c1High15) and not na(c1Low15) and not na(rangeStartTime15) and f_passes_minimum_range_filter(c1High15, c1Low15)
+if new15mEvent and not na(c1High15) and not na(c1Low15) and not na(rangeStartTime15)
     bool bullish15m = f_is_bullish_crt(c1High15, c1Low15, c2High15, c2Low15, c2Close15) and f_passes_sma_filter(DIRECTION_BULLISH, c2Close15, confirmed4hSma200)
     bool bearish15m = f_is_bearish_crt(c1High15, c1Low15, c2High15, c2Low15, c2Close15) and f_passes_sma_filter(DIRECTION_BEARISH, c2Close15, confirmed4hSma200)
     if bullish15m
@@ -845,13 +846,15 @@ if new15mEvent and not na(c1High15) and not na(c1Low15) and not na(rangeStartTim
         float bullishDisplayRangeLow = c1Low15
         float bullishTarget = c1High15
         float bullishBreakoutLevel = c2High15
-        f_add_crt(15, DIRECTION_BULLISH, bullishDisplayRangeHigh, bullishDisplayRangeLow, bullishTarget, bullishBreakoutLevel, rangeStartTime15, breakoutStartTime15, confirmationTime15, useNative15mCrt ? bar_index + 1 : bar_index, c2SessionKey15, time_close)
+        if f_passes_minimum_range_filter(bullishTarget, bullishBreakoutLevel)
+            f_add_crt(15, DIRECTION_BULLISH, bullishDisplayRangeHigh, bullishDisplayRangeLow, bullishTarget, bullishBreakoutLevel, rangeStartTime15, breakoutStartTime15, confirmationTime15, useNative15mCrt ? bar_index + 1 : bar_index, c2SessionKey15, time_close)
     if bearish15m
         float bearishDisplayRangeHigh = c1High15
         float bearishDisplayRangeLow = c1Low15
         float bearishTarget = c1Low15
         float bearishBreakoutLevel = c2Low15
-        f_add_crt(15, DIRECTION_BEARISH, bearishDisplayRangeHigh, bearishDisplayRangeLow, bearishTarget, bearishBreakoutLevel, rangeStartTime15, breakoutStartTime15, confirmationTime15, useNative15mCrt ? bar_index + 1 : bar_index, c2SessionKey15, time_close)
+        if f_passes_minimum_range_filter(bearishTarget, bearishBreakoutLevel)
+            f_add_crt(15, DIRECTION_BEARISH, bearishDisplayRangeHigh, bearishDisplayRangeLow, bearishTarget, bearishBreakoutLevel, rangeStartTime15, breakoutStartTime15, confirmationTime15, useNative15mCrt ? bar_index + 1 : bar_index, c2SessionKey15, time_close)
 
 f_update_crt_lifecycle()
 
