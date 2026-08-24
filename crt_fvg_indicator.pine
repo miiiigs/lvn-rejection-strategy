@@ -71,6 +71,8 @@ int maximumStoredCrtRanges = input.int(40, "Maximum Stored CRT Ranges", minval =
 bool showCrtLabels = input.bool(true, "Show CRT Labels", group = GROUP_STYLE)
 bool showBreakoutLevel = input.bool(true, "Show Breakout Level", group = GROUP_STYLE)
 bool showBreakoutLabels = input.bool(false, "Show Breakout Labels", group = GROUP_STYLE)
+color crtLevelColor = input.color(color.rgb(205, 145, 35), "CRT Level Color", group = GROUP_STYLE)
+int crtLevelWidth = input.int(2, "CRT Level Width", minval = 1, maxval = 4, group = GROUP_STYLE)
 bool dimCompletedRanges = input.bool(true, "Dim Completed Historical Ranges", tooltip = "When completed ranges are retained, make them visually lighter and append HIT to their label.", group = GROUP_STYLE)
 int activeFillTransparency = input.int(90, "Active Range Fill Transparency", minval = 0, maxval = 100, group = GROUP_STYLE)
 int completedFillTransparency = input.int(96, "Completed Range Fill Transparency", minval = 0, maxval = 100, group = GROUP_STYLE)
@@ -203,10 +205,14 @@ f_set_crt_right_edge(int index, int rightTime) =>
     line highLine = array.get(crtHighLines, index)
     line lowLine = array.get(crtLowLines, index)
     line midLine = array.get(crtMidLines, index)
-    box.set_right(crtBox, rightTime)
-    line.set_x2(highLine, rightTime)
-    line.set_x2(lowLine, rightTime)
-    line.set_x2(midLine, rightTime)
+    if not na(crtBox)
+        box.set_right(crtBox, rightTime)
+    if not na(highLine)
+        line.set_x2(highLine, rightTime)
+    if not na(lowLine)
+        line.set_x2(lowLine, rightTime)
+    if not na(midLine)
+        line.set_x2(midLine, rightTime)
 
 f_set_breakout_right_edge(int index, int rightTime) =>
     line breakoutLine = array.get(crtBreakoutLines, index)
@@ -223,10 +229,14 @@ f_delete_crt_objects(int index) =>
     line breakoutLine = array.get(crtBreakoutLines, index)
     label crtLabel = array.get(crtLabels, index)
     label breakoutLabel = array.get(crtBreakoutLabels, index)
-    box.delete(crtBox)
-    line.delete(highLine)
-    line.delete(lowLine)
-    line.delete(midLine)
+    if not na(crtBox)
+        box.delete(crtBox)
+    if not na(highLine)
+        line.delete(highLine)
+    if not na(lowLine)
+        line.delete(lowLine)
+    if not na(midLine)
+        line.delete(midLine)
     if not na(breakoutLine)
         line.delete(breakoutLine)
     if not na(crtLabel)
@@ -589,23 +599,25 @@ f_render_fvg_comparison_table() =>
 f_add_crt(int streamMinutes, int direction, float rangeHigh, float rangeLow, float target, float breakoutLevel, int rangeStartTime, int breakoutStartTime, int confirmationTime, int activationBar, int sessionKey, int initialRightTime) =>
     float midpoint = (rangeHigh + rangeLow) * 0.5
     color streamColor = f_crt_color(streamMinutes, direction)
-    color fillColor = color.new(streamColor, activeFillTransparency)
-    color midpointColor = color.new(streamColor, 35)
-    color breakoutColor = color.new(streamColor, 20)
+    color levelColor = crtLevelColor
     string labelText = f_stream_name(streamMinutes) + " " + (direction == DIRECTION_BULLISH ? "Bull CRT" : "Bear CRT")
-    box crtBox = box.new(rangeStartTime, rangeHigh, initialRightTime, rangeLow, xloc = xloc.bar_time, bgcolor = fillColor, border_color = streamColor, border_width = 1)
-    line highLine = line.new(rangeStartTime, rangeHigh, initialRightTime, rangeHigh, xloc = xloc.bar_time, color = streamColor, width = 1)
-    line lowLine = line.new(rangeStartTime, rangeLow, initialRightTime, rangeLow, xloc = xloc.bar_time, color = streamColor, width = 1)
-    line midLine = line.new(rangeStartTime, midpoint, initialRightTime, midpoint, xloc = xloc.bar_time, color = midpointColor, width = 1, style = line.style_dotted)
+    box crtBox = na
+    line highLine = na
+    line lowLine = na
+    line midLine = na
+    if direction == DIRECTION_BULLISH
+        highLine := line.new(rangeStartTime, target, initialRightTime, target, xloc = xloc.bar_time, color = levelColor, width = crtLevelWidth, style = line.style_dashed)
+    else
+        lowLine := line.new(rangeStartTime, target, initialRightTime, target, xloc = xloc.bar_time, color = levelColor, width = crtLevelWidth, style = line.style_dashed)
     line breakoutLine = na
     label crtLabel = na
     label breakoutLabel = na
     if showBreakoutLevel
-        breakoutLine := line.new(breakoutStartTime, breakoutLevel, initialRightTime, breakoutLevel, xloc = xloc.bar_time, color = breakoutColor, width = 1, style = line.style_dashed)
+        breakoutLine := line.new(breakoutStartTime, breakoutLevel, initialRightTime, breakoutLevel, xloc = xloc.bar_time, color = levelColor, width = crtLevelWidth, style = line.style_dashed)
         if showBreakoutLabels
-            breakoutLabel := label.new(breakoutStartTime, breakoutLevel, f_stream_name(streamMinutes) + " Breakout", xloc = xloc.bar_time, style = label.style_label_left, color = breakoutColor, textcolor = color.white, size = size.tiny)
+            breakoutLabel := label.new(breakoutStartTime, breakoutLevel, f_stream_name(streamMinutes) + " Breakout", xloc = xloc.bar_time, style = label.style_label_left, color = levelColor, textcolor = color.white, size = size.tiny)
     if showCrtLabels
-        float labelPrice = direction == DIRECTION_BULLISH ? rangeLow : rangeHigh
+        float labelPrice = target
         crtLabel := label.new(
              confirmationTime,
              labelPrice,
@@ -649,6 +661,7 @@ f_style_completed_crt(int index) =>
     int streamMinutes = array.get(crtStreamMinutes, index)
     int direction = array.get(crtDirections, index)
     color streamColor = f_crt_color(streamMinutes, direction)
+    color levelColor = crtLevelColor
     box crtBox = array.get(crtBoxes, index)
     line highLine = array.get(crtHighLines, index)
     line lowLine = array.get(crtLowLines, index)
@@ -656,11 +669,15 @@ f_style_completed_crt(int index) =>
     label crtLabel = array.get(crtLabels, index)
 
     if dimCompletedRanges
-        box.set_bgcolor(crtBox, color.new(streamColor, completedFillTransparency))
-        box.set_border_color(crtBox, color.new(streamColor, 55))
-        line.set_color(highLine, color.new(streamColor, 55))
-        line.set_color(lowLine, color.new(streamColor, 55))
-        line.set_color(midLine, color.new(streamColor, 70))
+        if not na(crtBox)
+            box.set_bgcolor(crtBox, color.new(levelColor, completedFillTransparency))
+            box.set_border_color(crtBox, color.new(levelColor, 55))
+        if not na(highLine)
+            line.set_color(highLine, color.new(levelColor, 55))
+        if not na(lowLine)
+            line.set_color(lowLine, color.new(levelColor, 55))
+        if not na(midLine)
+            line.set_color(midLine, color.new(levelColor, 70))
 
         if not na(crtLabel)
             string completedText = f_stream_name(streamMinutes) + " " + (direction == DIRECTION_BULLISH ? "Bull CRT" : "Bear CRT") + " • HIT"
