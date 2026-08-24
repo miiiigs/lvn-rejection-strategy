@@ -71,6 +71,7 @@ int maximumStoredCrtRanges = input.int(40, "Maximum Stored CRT Ranges", minval =
 bool showCrtLabels = input.bool(true, "Show CRT Labels", group = GROUP_STYLE)
 bool showBreakoutLevel = input.bool(true, "Show Breakout Level", group = GROUP_STYLE)
 bool showBreakoutLabels = input.bool(false, "Show Breakout Labels", group = GROUP_STYLE)
+bool showCrtMidpoint = input.bool(true, "Show CRT Midpoint", group = GROUP_STYLE)
 color crtLevelColor = input.color(color.rgb(205, 145, 35), "CRT Level Color", group = GROUP_STYLE)
 int crtLevelWidth = input.int(2, "CRT Level Width", minval = 1, maxval = 4, group = GROUP_STYLE)
 bool dimCompletedRanges = input.bool(true, "Dim Completed Historical Ranges", tooltip = "When completed ranges are retained, make them visually lighter and append HIT to their label.", group = GROUP_STYLE)
@@ -597,7 +598,7 @@ f_render_fvg_comparison_table() =>
     renderedCount
 
 f_add_crt(int streamMinutes, int direction, float rangeHigh, float rangeLow, float target, float breakoutLevel, int rangeStartTime, int breakoutStartTime, int confirmationTime, int activationBar, int sessionKey, int initialRightTime) =>
-    float midpoint = (rangeHigh + rangeLow) * 0.5
+    float midpoint = (target + breakoutLevel) * 0.5
     color streamColor = f_crt_color(streamMinutes, direction)
     color levelColor = crtLevelColor
     string labelText = f_stream_name(streamMinutes) + " " + (direction == DIRECTION_BULLISH ? "Bull CRT" : "Bear CRT")
@@ -606,14 +607,16 @@ f_add_crt(int streamMinutes, int direction, float rangeHigh, float rangeLow, flo
     line lowLine = na
     line midLine = na
     if direction == DIRECTION_BULLISH
-        highLine := line.new(rangeStartTime, target, initialRightTime, target, xloc = xloc.bar_time, color = levelColor, width = crtLevelWidth, style = line.style_dashed)
+        highLine := line.new(rangeStartTime, target, initialRightTime, target, xloc = xloc.bar_time, color = levelColor, width = crtLevelWidth, style = line.style_solid)
     else
-        lowLine := line.new(rangeStartTime, target, initialRightTime, target, xloc = xloc.bar_time, color = levelColor, width = crtLevelWidth, style = line.style_dashed)
+        lowLine := line.new(rangeStartTime, target, initialRightTime, target, xloc = xloc.bar_time, color = levelColor, width = crtLevelWidth, style = line.style_solid)
+    if showCrtMidpoint
+        midLine := line.new(rangeStartTime, midpoint, initialRightTime, midpoint, xloc = xloc.bar_time, color = levelColor, width = 1, style = line.style_dashed)
     line breakoutLine = na
     label crtLabel = na
     label breakoutLabel = na
     if showBreakoutLevel
-        breakoutLine := line.new(breakoutStartTime, breakoutLevel, initialRightTime, breakoutLevel, xloc = xloc.bar_time, color = levelColor, width = crtLevelWidth, style = line.style_dashed)
+        breakoutLine := line.new(breakoutStartTime, breakoutLevel, initialRightTime, breakoutLevel, xloc = xloc.bar_time, color = levelColor, width = crtLevelWidth, style = line.style_solid)
         if showBreakoutLabels
             breakoutLabel := label.new(breakoutStartTime, breakoutLevel, f_stream_name(streamMinutes) + " Breakout", xloc = xloc.bar_time, style = label.style_label_left, color = levelColor, textcolor = color.white, size = size.tiny)
     if showCrtLabels
